@@ -1,0 +1,266 @@
+import { Ionicons } from "@expo/vector-icons";
+import AppLoader from "../../components/AppLoader";
+import { Image } from "expo-image";
+import { router, useFocusEffect } from "expo-router";
+import { addDoc, collection, deleteDoc, doc, getDocs, updateDoc } from "firebase/firestore";
+import { useCallback, useState } from "react";
+import {
+    ActivityIndicator, Alert, FlatList,
+    Modal, Platform, StyleSheet, Switch, Text, TextInput,
+    TouchableOpacity, View
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { db, logOut } from "../../lib/firebase";
+import { type Banner } from "../../lib/firebase-store";
+
+import * as ImagePicker from "expo-image-picker";
+import { uploadToCloudinary } from "../../lib/cloudinary";
+
+
+export default function AdminBanners() {
+  const [banners, setBanners] = useState<Banner[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [pickingImage, setPickingImage] = useState(false);
+  
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", imageUrl: "", active: true });
+
+  async function handleLogout() {
+    if (Platform.OS === "web") {
+      try { await logOut(); } catch (err) { console.error("Logout error:", err); }
+      router.replace("/(auth)/welcome");
+      return;
+    }
+    Alert.alert("Log Out", "Are you sure?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Log Out", style: "destructive", onPress: async () => { await logOut(); router.replace("/(auth)/welcome"); } },
+    ]);
+  }
+
+  useFocusEffect(useCallback(() => { loadBanners(); }, []));
+
+  async function loadBanners() {
+    setLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "banners"));
+      const data = snap.docs.map(d => {
+        const docData = d.data();
+        return {
+          id: d.id,
+          ...docData,
+          createdAt: docData.createdAt?.toDate?.() || new Date(docData.createdAt || Date.now())
+        } as Banner;
+      });
+      data.sort((a,b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
+      setBanners(data);
+    } catch (e: any) {
+      console.error(e);
+      Alert.alert("Error", "Could not load banners");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function openNew() {
+    setEditId(null);
+    setForm({ name: "", imageUrl: "", active: true });
+    setModalVisible(true);
+  }
+
+  function openEdit(banner: Banner) {
+    setEditId(banner.id);
+    setForm({ name: banner.name, imageUrl: banner.imageUrl, active: banner.active });
+    setModalVisible(true);
+  }
+
+  async function pickBannerImage() {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]?.uri) {
+        setPickingImage(true);
+        let finalUrl = result.assets[0].uri;
+        try {
+          finalUrl = await uploadToCloudinary(result.assets[0].uri, "foodfix/banners");
+        } catch (e: any) {
+          console.warn("Cloudinary upload failed, using local URI fallback", e);
+        }
+        setForm(f => ({ ...f, imageUrl: finalUrl }));
+        setPickingImage(false);
+      }
+    } catch (e: any) {
+      setPickingImage(false);
+      Alert.alert("Error", e.message || "Failed to pick image");
+    }
+  }
+
+  async function handleSave() {
+    if (!form.name.trim() || !form.imageUrl.trim()) {
+      Alert.alert("Error", "Please fill in all fields.");
+      return;
+    }
+    setSaving(true);
+    try {
+      let finalImageUrl = form.imageUrl.trim();
+      if (!finalImageUrl.startsWith("http://") && !finalImageUrl.startsWith("https://")) {
+        try {
+          finalImageUrl = await uploadToCloudinary(finalImageUrl, "foodfix/banners");
+        } catch (e) {}
+      }
+
+      if (editId) {
+        await updateDoc(doc(db, "banners", editId), {
+          name: form.name.trim(),
+          imageUrl: finalImageUrl,
+          active: form.active,
+        });
+      } else {
+        await addDoc(collection(db, "banners"), {
+          name: form.name.trim(),
+          imageUrl: finalImageUrl,
+          active: form.active,
+          createdAt: new Date()
+        });
+      }
+      setModalVisible(false);
+      loadBanners();
+    } catch (e: any) {
+      Alert.alert("Error storing", e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    Alert.alert("Confirm Delete", "Are you sure you want to delete this banner?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+          try {
+            await deleteDoc(doc(db, "banners", id));
+            loadBanners();
+          } catch(e:any) { Alert.alert("Error", e.message); }
+      }}
+    ]);
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Manage Banners</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity style={styles.addBtn} onPress={openNew}>
+            <Ionicons name="add" size={24} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: "#FFF0ED" }]} onPress={handleLogout} accessibilityLabel="Log Out">
+            <Ionicons name="log-out-outline" size={20} color="#D92614" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {loading ? (
+        <AppLoader full={false} />
+      ) : (
+        <FlatList
+          data={banners}
+          keyExtractor={(i) => i.id}
+          contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          renderItem={({ item }) => (
+            <View style={[styles.card, !item.active && { opacity: 0.5 }]}>
+              <Image source={{ uri: item.imageUrl }} style={styles.image} contentFit="cover" />
+              <View style={styles.cardInfo}>
+                <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
+                <Text style={styles.cardStatus}>{item.active ? "Active" : "Inactive"}</Text>
+                <View style={styles.cardActions}>
+                  <TouchableOpacity onPress={() => openEdit(item)} style={styles.iconBtn}>
+                    <Ionicons name="pencil" size={20} color="#F25C05" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.iconBtn}>
+                    <Ionicons name="trash" size={20} color="#E74C3C" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+        />
+      )}
+
+      {/* Form Modal */}
+      <Modal visible={modalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{editId ? "Edit Banner" : "New Banner"}</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}><Ionicons name="close" size={28} color="#888" /></TouchableOpacity>
+            </View>
+            
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Banner Name (Offer/Title)</Text>
+              <TextInput style={styles.input} value={form.name} onChangeText={(t) => setForm({...form, name: t})} placeholder="e.g. Summer Sale!" placeholderTextColor="#aaa" />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Banner Image</Text>
+              <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+                <TouchableOpacity
+                  style={{ flex: 1, backgroundColor: "#FEF3EC", borderWidth: 1.5, borderColor: "#F25C05", borderStyle: "dashed", borderRadius: 10, padding: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 }}
+                  onPress={pickBannerImage}
+                  disabled={pickingImage}
+                >
+                  {pickingImage ? <ActivityIndicator size="small" color="#F25C05" /> : (
+                    <>
+                      <Ionicons name="cloud-upload-outline" size={18} color="#F25C05" />
+                      <Text style={{ color: "#F25C05", fontWeight: "bold", fontSize: 13 }}>Choose from Gallery</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {form.imageUrl ? (
+                <View style={{ marginTop: 10, borderRadius: 10, overflow: "hidden", height: 100, backgroundColor: "#f0e8d0" }}>
+                  <Image source={{ uri: form.imageUrl }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+                </View>
+              ) : null}
+            </View>
+
+            <View style={[styles.formGroup, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
+              <Text style={styles.toggleLabel}>Active (Visible to users)</Text>
+              <Switch value={form.active} onValueChange={(v) => setForm({...form, active: v})} trackColor={{ false: "#ddd", true: "#F25C05" }} />
+            </View>
+
+            <TouchableOpacity style={[styles.saveBtn, saving && {opacity: 0.7}]} onPress={handleSave} disabled={saving}>
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save Banner</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F9F0DC" },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12 },
+  title: { fontSize: 22, fontWeight: "bold", color: "#2E1A06" },
+  addBtn: { backgroundColor: "#F25C05", width: 40, height: 40, borderRadius: 20, justifyContent: "center", alignItems: "center" },
+  card: { backgroundColor: "#fff", borderRadius: 16, marginBottom: 14, overflow: "hidden", elevation: 2 },
+  image: { width: "100%", height: 140, backgroundColor: "#f0e8d0" },
+  cardInfo: { padding: 14, flexDirection: "row", alignItems: "center", gap: 8 },
+  cardTitle: { fontSize: 15, fontWeight: "bold", color: "#2E1A06", flex: 1 },
+  cardStatus: { fontSize: 12, color: "#888", width: 48, textAlign: "right" },
+  cardActions: { flexDirection: "row", gap: 12, paddingLeft: 8 },
+  iconBtn: { padding: 4 },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  modalContent: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40, elevation: 5 },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: "bold", color: "#2E1A06" },
+  formGroup: { marginBottom: 16 },
+  label: { fontSize: 13, color: "#888", marginBottom: 6, fontWeight: "600" },
+  toggleLabel: { fontSize: 14, color: "#333", fontWeight: "600" },
+  input: { backgroundColor: "#F9F5EF", borderRadius: 10, padding: 12, fontSize: 14, color: "#333" },
+  saveBtn: { backgroundColor: "#F25C05", padding: 14, borderRadius: 12, alignItems: "center", marginTop: 12 },
+  saveBtnText: { color: "#fff", fontSize: 15, fontWeight: "bold" }
+});

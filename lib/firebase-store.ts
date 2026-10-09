@@ -1,0 +1,1836 @@
+// Firebase Store - Food Ordering System CRUD Operations
+import type { Timestamp } from "firebase/firestore";
+import {
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    orderBy,
+    query,
+    runTransaction,
+    setDoc,
+    updateDoc,
+    where,
+} from "firebase/firestore";
+import type { OrderStatus, OrderType, PaymentMethod } from "../constants/order";
+import {
+    db,
+    handleSdkBlocked,
+    RestApi,
+    shouldUseRest,
+    type Profile
+} from "./firebase";
+import { createLogger } from "./logger";
+
+const log = createLogger("FirebaseStore");
+
+// ==================== TYPES ====================
+
+export interface MenuItem {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  image_url: string;
+  stock_quantity: number;
+  available: boolean;
+  is_made_to_order?: boolean;
+  nutrients?: { calories?: number; protein?: number; carbs?: number; fat?: number; fiber?: number; sodium?: number };
+  batch_date?: string; // ISO date string for daily batch tracking (shelf life)
+  created_at: Timestamp | { seconds: number };
+}
+
+export interface OrderItem {
+  menu_item_id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  image_url?: string;
+}
+
+export interface Order {
+  id: string;
+  order_number: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  customer_lat?: number;
+  customer_lng?: number;
+  order_note?: string;
+  items: OrderItem[];
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  status: OrderStatus;
+  order_type: OrderType;
+  payment_method: PaymentMethod;
+  scheduled_date?: string;
+  scheduled_time?: string;
+  reject_reason?: string;
+  issue_reason?: string;
+  prepared_by?: string;
+  driver_name?: string;
+  driver_phone?: string;
+  location_sharing_enabled?: boolean;
+  customer_location_opt_in?: boolean;
+  staff_location_opt_in?: boolean;
+  driver_id?: string;
+  refund_status?: "none" | "pending" | "approved" | "completed" | "rejected";
+  refund_amount?: number;
+  refund_reason?: string;
+  refund_image_url?: string;
+  refund_rejection_reason?: string;
+  refund_account_name?: string;
+  refund_account_number?: string;
+  refund_method?: string;
+  created_at: Timestamp | { seconds: number };
+  updated_at?: Timestamp | { seconds: number };
+}
+
+export interface LiveLocation {
+  user_id: string;
+  role: "customer" | "staff";
+  lat: number;
+  lng: number;
+  heading?: number;
+  speed?: number;
+  accuracy?: number;
+  updated_at: Timestamp | { seconds: number };
+}
+
+export interface Message {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  sender_name: string;
+  sender_role: string;
+  content: string;
+  read: boolean;
+  created_at: Timestamp | { seconds: number };
+}
+
+export interface Review {
+  id: string;
+  user_id: string;
+  username: string;
+  order_id: string;
+  menu_item_id: string;
+  menu_item_name: string;
+  rating: number;
+  comment: string;
+  image_url?: string;
+  created_at: Timestamp | { seconds: number };
+}
+
+export interface Favorite {
+  id: string;
+  user_id: string;
+  menu_item_id: string;
+  collection_id?: string;
+  created_at: Timestamp | { seconds: number };
+}
+
+export interface AppSettings {
+  delivery_fee: number;
+  delivery_radius_km: number;
+  gcash_enabled: boolean;
+  gcash_number?: string;
+  gcash_qr_image?: string;
+  store_name: string;
+  store_address: string;
+  store_phone: string;
+  store_lat: number;
+  store_lng: number;
+}
+
+// ==================== HELPERS ====================
+
+function toEpochSeconds(value: any): number {
+  if (!value) return 0;
+  if (typeof value?.seconds === "number") return value.seconds;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+}
+
+/** Oldest first ("first to place, first to get"). Docs missing created_at keep relative order at the front. */
+function sortOldestFirst<T extends { created_at?: any }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => toEpochSeconds(a.created_at) - toEpochSeconds(b.created_at));
+}
+
+const ORDER_COUNTER_DOC = "order_number";
+
+/**
+ * Next sequential order id as a plain number ("1042").
+ * Increments counters/order_number atomically; the REST path does a
+ * best-effort read-modify-write when the SDK is unavailable.
+ */
+async function generateOrderNumber(): Promise<string> {
+  const counterRef = doc(db, "counters", ORDER_COUNTER_DOC);
+  return firestoreOp(
+    async () => {
+      const next = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(counterRef);
+        const current = snap.exists() ? Number((snap.data() as any).value) || 0 : 0;
+        const value = current + 1;
+        tx.set(counterRef, { value, updated_at: new Date() });
+        return value;
+      });
+      return String(next);
+    },
+    async () => {
+      const existing = (await RestApi.getDocument("counters", ORDER_COUNTER_DOC)) as { value?: number } | null;
+      const value = (Number(existing?.value) || 0) + 1;
+      await RestApi.updateDocument("counters", ORDER_COUNTER_DOC, {
+        value,
+        updated_at: new Date().toISOString(),
+      });
+      return String(value);
+    },
+  );
+}
+
+async function firestoreOp<T>(
+  sdkFn: () => Promise<T>,
+  restFn: () => Promise<T>,
+): Promise<T> {
+  if (shouldUseRest()) {
+    return restFn();
+  }
+  try {
+    return await sdkFn();
+  } catch (error) {
+    handleSdkBlocked(error);
+    return restFn();
+  }
+}
+
+// ==================== MENU ITEMS ====================
+
+export async function getMenuItems(filters?: {
+  category?: string;
+  search?: string;
+  availableOnly?: boolean;
+  autoExpireDaily?: boolean;
+}): Promise<MenuItem[]> {
+  let items: MenuItem[] = [];
+
+  items = await firestoreOp(
+    async () => {
+      const q = query(collection(db, "menu_items"), orderBy("name"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as MenuItem[];
+    },
+    async () => {
+      const data = await RestApi.getCollection("menu_items", "name");
+      return data as MenuItem[];
+    },
+  );
+
+  if (filters?.availableOnly) {
+    items = items.filter((i) => i.available && i.stock_quantity > 0);
+  }
+  if (filters?.category) {
+    items = items.filter((i) => i.category === filters.category);
+  }
+  if (filters?.search) {
+    const s = filters.search.toLowerCase();
+    items = items.filter(
+      (i) => i.name.toLowerCase().includes(s) || i.description?.toLowerCase().includes(s),
+    );
+  }
+
+  if (filters?.autoExpireDaily) {
+    const today = new Date().toISOString().slice(0, 10);
+    items = items.filter((i) => !i.batch_date || i.batch_date === today);
+  }
+
+  // Stock hierarchy: first placed, first served — oldest items first.
+  items = sortOldestFirst(items);
+
+  return items;
+}
+
+export function onMenuItemsUpdate(
+  callback: (items: MenuItem[]) => void,
+): () => void {
+  try {
+    const { onSnapshot: firestoreOnSnapshot } = require("firebase/firestore");
+    const q = query(collection(db, "menu_items"), orderBy("name"));
+    const unsub = firestoreOnSnapshot(q, (snapshot: any) => {
+      const items = snapshot.docs.map((d: any) => ({
+        id: d.id,
+        ...d.data(),
+      })) as MenuItem[];
+      callback(sortOldestFirst(items));
+    }, (error: any) => {
+      log.warn("onMenuItemsUpdate error", error);
+    });
+    return unsub;
+  } catch {
+    return () => {};
+  }
+}
+
+export async function getMenuItem(id: string): Promise<MenuItem | null> {
+  return firestoreOp(
+    async () => {
+      const snap = await getDoc(doc(db, "menu_items", id));
+      return snap.exists() ? ({ id: snap.id, ...snap.data() } as MenuItem) : null;
+    },
+    async () => (await RestApi.getDocument("menu_items", id)) as MenuItem | null,
+  );
+}
+
+export async function addMenuItem(data: Omit<MenuItem, "id" | "created_at">): Promise<{ id: string }> {
+  const payload = { ...data, created_at: new Date() };
+  return firestoreOp(
+    async () => {
+      const ref = await addDoc(collection(db, "menu_items"), payload);
+      return { id: ref.id };
+    },
+    async () => {
+      const id = await RestApi.createDocument("menu_items", payload);
+      return { id };
+    },
+  );
+}
+
+export async function updateMenuItem(id: string, data: Partial<MenuItem>): Promise<void> {
+  return firestoreOp(
+    async () => { await updateDoc(doc(db, "menu_items", id), data as any); },
+    async () => { await RestApi.updateDocument("menu_items", id, data); },
+  );
+}
+
+export async function deleteMenuItem(id: string): Promise<void> {
+  return firestoreOp(
+    async () => { await deleteDoc(doc(db, "menu_items", id)); },
+    async () => { await RestApi.deleteDocument("menu_items", id); },
+  );
+}
+
+// ==================== ORDERS ====================
+
+export async function createOrder(data: {
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  customer_lat?: number;
+  customer_lng?: number;
+  order_note?: string;
+  items: OrderItem[];
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  order_type: OrderType;
+  payment_method: PaymentMethod;
+  scheduled_date?: string;
+  scheduled_time?: string;
+}): Promise<{ id: string; order_number: string }> {
+  const order_number = await generateOrderNumber();
+  const payload = {
+    ...data,
+    order_number,
+    status: "pending" as OrderStatus,
+    created_at: new Date(),
+    updated_at: new Date(),
+  };
+
+  log.info("Creating order", { order_number, customer_id: data.customer_id, total: data.total, itemCount: data.items.length });
+
+  const result = await firestoreOp(
+    async () => {
+      const ref = await addDoc(collection(db, "orders"), payload);
+      return { id: ref.id };
+    },
+    async () => {
+      const id = await RestApi.createDocument("orders", payload);
+      return { id };
+    },
+  );
+
+  log.info("Order created", { orderId: result.id, order_number });
+  return { id: result.id, order_number };
+}
+
+export async function getOrders(filters?: {
+  status?: OrderStatus;
+  customer_id?: string;
+}): Promise<Order[]> {
+  let orders: Order[] = [];
+
+  orders = await firestoreOp(
+    async () => {
+      const q = query(collection(db, "orders"), orderBy("created_at", "desc"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[];
+    },
+    async () => {
+      const data = await RestApi.getCollection("orders", "created_at");
+      return data as Order[];
+    },
+  );
+
+  if (filters?.status) {
+    orders = orders.filter((o) => o.status === filters.status);
+  }
+  if (filters?.customer_id) {
+    orders = orders.filter((o) => o.customer_id === filters.customer_id);
+  }
+
+  // FIFO order queues: oldest order first so the first to place gets served first.
+  orders = sortOldestFirst(orders);
+
+  return orders;
+}
+
+export async function getOrder(id: string): Promise<Order | null> {
+  return firestoreOp(
+    async () => {
+      const snap = await getDoc(doc(db, "orders", id));
+      return snap.exists() ? ({ id: snap.id, ...snap.data() } as Order) : null;
+    },
+    async () => (await RestApi.getDocument("orders", id)) as Order | null,
+  );
+}
+
+export async function replenishOrderStock(order: Order): Promise<void> {
+  if (!order.items || order.items.length === 0) return;
+  log.info("Replenishing stock for cancelled order", { orderId: order.id, itemCount: order.items.length });
+  for (const item of order.items) {
+    if (!item.menu_item_id) continue;
+    try {
+      await firestoreOp(
+        async () => {
+          const itemRef = doc(db, "menu_items", item.menu_item_id);
+          const snap = await getDoc(itemRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            if (!data.is_made_to_order && !data.batch_date) {
+              await updateDoc(itemRef, { stock_quantity: increment(item.quantity) });
+            }
+          }
+        },
+        async () => {
+          const menuItem = (await RestApi.getDocument("menu_items", item.menu_item_id)) as MenuItem | null;
+          if (menuItem && !menuItem.is_made_to_order && !menuItem.batch_date) {
+            await RestApi.updateDocument("menu_items", item.menu_item_id, {
+              stock_quantity: (menuItem.stock_quantity || 0) + item.quantity,
+            });
+          }
+        },
+      );
+    } catch (err) {
+      log.error("Failed to replenish stock for item", { itemId: item.menu_item_id, error: err });
+    }
+  }
+}
+
+export async function rollbackStock(items: { menu_item_id: string; quantity: number }[]): Promise<void> {
+  log.info("Rolling back stock after checkout failure", { itemCount: items.length });
+  for (const item of items) {
+    if (!item.menu_item_id) continue;
+    try {
+      await firestoreOp(
+        async () => {
+          const itemRef = doc(db, "menu_items", item.menu_item_id);
+          const snap = await getDoc(itemRef);
+          if (snap.exists() && !snap.data()?.is_made_to_order && !snap.data()?.batch_date) {
+            await updateDoc(itemRef, { stock_quantity: increment(item.quantity) });
+          }
+        },
+        async () => {
+          const menuItem = (await RestApi.getDocument("menu_items", item.menu_item_id)) as MenuItem | null;
+          if (menuItem && !menuItem.is_made_to_order && !menuItem.batch_date) {
+            await RestApi.updateDocument("menu_items", item.menu_item_id, {
+              stock_quantity: (menuItem.stock_quantity || 0) + item.quantity,
+            });
+          }
+        },
+      );
+    } catch (err) {
+      log.error("Failed to rollback stock", { itemId: item.menu_item_id, error: err });
+    }
+  }
+}
+
+export async function updateOrderStatus(
+  orderId: string,
+  status: OrderStatus,
+  extra?: { reject_reason?: string; issue_reason?: string; prepared_by?: string; driver_name?: string; driver_phone?: string },
+): Promise<void> {
+  log.info("Updating order status", { orderId, status });
+  
+  if (status === "cancelled" || status === "unable_to_fulfill") {
+    try {
+      const existing = await getOrder(orderId);
+      if (existing && existing.status !== "cancelled" && existing.status !== "unable_to_fulfill") {
+        await replenishOrderStock(existing);
+      }
+    } catch (e) {
+      log.error("Failed to replenish stock on cancel", e);
+    }
+  }
+
+  const data: any = { status, updated_at: new Date(), ...extra };
+  return firestoreOp(
+    async () => { await updateDoc(doc(db, "orders", orderId), data); },
+    async () => { await RestApi.updateDocument("orders", orderId, data); },
+  );
+}
+
+export async function getOrdersByUser(userId: string): Promise<Order[]> {
+  log.info("Fetching orders by user", { userId });
+  const toSeconds = (value: any): number => {
+    if (!value) return 0;
+    if (typeof value?.seconds === "number") return value.seconds;
+    const ms = new Date(value).getTime();
+    return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+  };
+
+  const sortNewestFirst = (rows: Order[]) => {
+    return [...rows].sort((a, b) => toSeconds(b.created_at) - toSeconds(a.created_at));
+  };
+
+  try {
+    const orders = await firestoreOp(
+      async () => {
+        const q = query(
+          collection(db, "orders"),
+          where("customer_id", "==", userId),
+        );
+        const snapshot = await getDocs(q);
+        return sortNewestFirst(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]);
+      },
+      async () => {
+        const data = await RestApi.queryCollection("orders", "customer_id", "==", userId);
+        return sortNewestFirst(data as Order[]);
+      },
+    );
+    log.info("Orders fetched by user", { userId, count: orders.length });
+    return orders;
+  } catch (e) {
+    log.error("Failed to fetch orders by user", e);
+    throw e;
+  }
+}
+
+// ==================== MESSAGES ====================
+
+export async function sendMessage(data: {
+  conversation_id: string;
+  sender_id: string;
+  sender_name: string;
+  sender_role: string;
+  content: string;
+}): Promise<{ id: string }> {
+  // If a customer messages, automatically unarchive their conversation so it appears in Admin active inbox
+  if (data.sender_role === "customer") {
+    unarchiveConversation(data.conversation_id).catch(() => {});
+  }
+  const payload = { ...data, read: false, archived: false, created_at: new Date() };
+  return firestoreOp(
+    async () => {
+      const ref = await addDoc(collection(db, "messages"), payload);
+      return { id: ref.id };
+    },
+    async () => {
+      const id = await RestApi.createDocument("messages", payload);
+      return { id };
+    },
+  );
+}
+
+export async function getMessages(conversationId: string): Promise<Message[]> {
+  const messages = await firestoreOp(
+    async () => {
+      const q = query(
+        collection(db, "messages"),
+        where("conversation_id", "==", conversationId),
+        orderBy("created_at", "asc"),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Message[];
+    },
+    async () => {
+      const data = await RestApi.queryCollection("messages", "conversation_id", "==", conversationId);
+      return (data as Message[]).sort((a: any, b: any) => {
+        const aTime = a.created_at?.seconds || 0;
+        const bTime = b.created_at?.seconds || 0;
+        return aTime - bTime;
+      });
+    },
+  );
+  // Filter out archived messages
+  return messages.filter((m: any) => !m.archived);
+}
+
+export async function getConversations(): Promise<{ customer_id: string; customer_name: string; last_message: string; unread: number }[]> {
+  const allMessages = await firestoreOp(
+    async () => {
+      const q = query(collection(db, "messages"), orderBy("created_at", "desc"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Message[];
+    },
+    async () => {
+      const data = await RestApi.getCollection("messages", "created_at");
+      return data as Message[];
+    },
+  );
+
+  // Filter out archived messages (delete/archive hides them, new messages un-archive)
+  const activeMessages = allMessages.filter((m: any) => !m.archived);
+
+  const convMap = new Map<string, { customer_id: string; customer_name: string; last_message: string; unread: number }>();
+  for (const msg of activeMessages) {
+    const cid = msg.conversation_id;
+    if (!convMap.has(cid)) {
+      convMap.set(cid, {
+        customer_id: cid,
+        customer_name: msg.sender_role === "customer" ? msg.sender_name : "Customer",
+        last_message: msg.content,
+        unread: 0,
+      });
+    }
+    const conv = convMap.get(cid)!;
+    if (!msg.read && msg.sender_role === "customer") {
+      conv.unread++;
+    }
+    if (msg.sender_role === "customer") {
+      conv.customer_name = msg.sender_name;
+    }
+  }
+
+  return Array.from(convMap.values());
+}
+
+export async function deleteMessage(messageId: string): Promise<void> {
+  return firestoreOp(
+    async () => { await deleteDoc(doc(db, "messages", messageId)); },
+    async () => { await RestApi.deleteDocument("messages", messageId); },
+  );
+}
+
+export function onMessagesUpdate(
+  conversationId: string,
+  callback: (messages: Message[]) => void,
+): () => void {
+  try {
+    const { onSnapshot: firestoreOnSnapshot } = require("firebase/firestore");
+    const q = query(
+      collection(db, "messages"),
+      where("conversation_id", "==", conversationId),
+    );
+    const unsub = firestoreOnSnapshot(q, (snapshot: any) => {
+      const msgs = snapshot.docs.map((d: any) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Message[];
+      const toSeconds = (value: any): number => {
+        if (!value) return 0;
+        if (typeof value?.seconds === "number") return value.seconds;
+        const ms = new Date(value).getTime();
+        return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+      };
+      msgs.sort((a, b) => toSeconds(a.created_at) - toSeconds(b.created_at));
+      callback(msgs);
+    }, (error: any) => {
+      log.warn("onMessagesUpdate error", error);
+    });
+    return unsub;
+  } catch {
+    return () => {};
+  }
+}
+
+export async function markMessagesRead(conversationId: string, readerRole: string): Promise<void> {
+  const messages = await getMessages(conversationId);
+  for (const msg of messages) {
+    if (!msg.read && msg.sender_role !== readerRole) {
+      await firestoreOp(
+        async () => { await updateDoc(doc(db, "messages", msg.id), { read: true }); },
+        async () => { await RestApi.updateDocument("messages", msg.id, { read: true }); },
+      );
+    }
+  }
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  const allMessages = await firestoreOp(
+    async () => {
+      const q = query(
+        collection(db, "messages"),
+        where("conversation_id", "==", conversationId),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Message[];
+    },
+    async () => {
+      const data = await RestApi.queryCollection("messages", "conversation_id", "==", conversationId);
+      return data as Message[];
+    },
+  );
+  for (const msg of allMessages) {
+    await firestoreOp(
+      async () => { await deleteDoc(doc(db, "messages", msg.id)); },
+      async () => { await RestApi.deleteDocument("messages", msg.id); },
+    );
+  }
+}
+
+export async function archiveConversation(conversationId: string): Promise<void> {
+  const allMessages = await firestoreOp(
+    async () => {
+      const q = query(
+        collection(db, "messages"),
+        where("conversation_id", "==", conversationId),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Message[];
+    },
+    async () => {
+      const data = await RestApi.queryCollection("messages", "conversation_id", "==", conversationId);
+      return data as Message[];
+    },
+  );
+  const archivedAt = new Date().toISOString();
+  for (const msg of allMessages) {
+    await firestoreOp(
+      async () => { await updateDoc(doc(db, "messages", msg.id), { archived: true, archived_at: archivedAt }); },
+      async () => { await RestApi.updateDocument("messages", msg.id, { archived: true, archived_at: archivedAt }); },
+    );
+  }
+}
+
+export async function unarchiveConversation(conversationId: string): Promise<void> {
+  const allMessages = await firestoreOp(
+    async () => {
+      const q = query(
+        collection(db, "messages"),
+        where("conversation_id", "==", conversationId),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Message[];
+    },
+    async () => {
+      const data = await RestApi.queryCollection("messages", "conversation_id", "==", conversationId);
+      return data as Message[];
+    },
+  );
+  for (const msg of allMessages) {
+    await firestoreOp(
+      async () => { await updateDoc(doc(db, "messages", msg.id), { archived: false, archived_at: null }); },
+      async () => { await RestApi.updateDocument("messages", msg.id, { archived: false, archived_at: null }); },
+    );
+  }
+}
+
+export async function getArchivedConversations(): Promise<{ customer_id: string; customer_name: string; last_message: string; unread: number }[]> {
+  const allMessages = await firestoreOp(
+    async () => {
+      const q = query(collection(db, "messages"), orderBy("created_at", "desc"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Message[];
+    },
+    async () => {
+      const data = await RestApi.getCollection("messages", "created_at");
+      return data as Message[];
+    },
+  );
+
+  const archivedMessages = allMessages.filter((m: any) => m.archived);
+
+  const convMap = new Map<string, { customer_id: string; customer_name: string; last_message: string; unread: number }>();
+  for (const msg of archivedMessages) {
+    const cid = msg.conversation_id;
+    if (!convMap.has(cid)) {
+      convMap.set(cid, {
+        customer_id: cid,
+        customer_name: msg.sender_role === "customer" ? msg.sender_name : "Customer",
+        last_message: msg.content,
+        unread: 0,
+      });
+    }
+    const conv = convMap.get(cid)!;
+    if (msg.sender_role === "customer") {
+      conv.customer_name = msg.sender_name;
+    }
+  }
+
+  return Array.from(convMap.values());
+}
+
+export async function cleanupArchivedMessages(): Promise<void> {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const cutoff = thirtyDaysAgo.toISOString();
+
+  const allMessages = await firestoreOp(
+    async () => {
+      const q = query(collection(db, "messages"), where("archived", "==", true));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as (Message & { archived_at?: string })[];
+    },
+    async () => {
+      const data = await RestApi.queryCollection("messages", "archived", "==", true);
+      return data as (Message & { archived_at?: string })[];
+    },
+  );
+
+  for (const msg of allMessages) {
+    if (msg.archived_at && msg.archived_at < cutoff) {
+      await firestoreOp(
+        async () => { await deleteDoc(doc(db, "messages", msg.id)); },
+        async () => { await RestApi.deleteDocument("messages", msg.id); },
+      );
+    }
+  }
+}
+
+export async function validateStock(items: { menu_item_id: string; name: string; quantity: number }[]): Promise<{ valid: boolean; issues: string[] }> {
+  log.info("Validating stock", { itemCount: items.length });
+  const issues: string[] = [];
+
+  await firestoreOp(
+    async () => {
+      try {
+        await runTransaction(db, async (transaction) => {
+          const refs = items.map((item) => doc(db, "menu_items", item.menu_item_id));
+          const snaps = await Promise.all(refs.map((ref) => transaction.get(ref)));
+
+          const localIssues: string[] = [];
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const snap = snaps[i];
+            if (!snap.exists()) {
+              localIssues.push(`${item.name} is no longer available.`);
+            } else {
+              const data = snap.data();
+              const isUnlimited = data.is_made_to_order || !!data.batch_date;
+              if (!data.available) {
+                localIssues.push(`${item.name} is currently unavailable.`);
+              } else if (!isUnlimited && (data.stock_quantity || 0) < item.quantity) {
+                const qty = data.stock_quantity || 0;
+                if (qty <= 0) {
+                  localIssues.push(`${item.name} is out of stock.`);
+                } else {
+                  localIssues.push(`${item.name}: only ${qty} left (you have ${item.quantity}).`);
+                }
+              }
+            }
+          }
+
+          if (localIssues.length > 0) {
+            issues.push(...localIssues);
+            return;
+          }
+
+          for (let i = 0; i < items.length; i++) {
+            const data = snaps[i].data();
+            const isUnlimited = data?.is_made_to_order || !!data?.batch_date;
+            if (!isUnlimited) {
+              transaction.update(doc(db, "menu_items", items[i].menu_item_id), {
+                stock_quantity: increment(-items[i].quantity),
+              });
+            }
+          }
+        });
+      } catch {
+        issues.push("Stock verification failed. Please try again.");
+      }
+    },
+    async () => {
+      for (const item of items) {
+        try {
+          const menuItem = await RestApi.getDocument("menu_items", item.menu_item_id) as MenuItem | null;
+          if (!menuItem) {
+            issues.push(`${item.name} is no longer available.`);
+          } else if (!menuItem.available) {
+            issues.push(`${item.name} is currently unavailable.`);
+          } else {
+            const isUnlimited = menuItem.is_made_to_order || !!menuItem.batch_date;
+            if (!isUnlimited && (menuItem.stock_quantity || 0) < item.quantity) {
+              if ((menuItem.stock_quantity || 0) <= 0) {
+                issues.push(`${item.name} is out of stock.`);
+              } else {
+                issues.push(`${item.name}: only ${menuItem.stock_quantity} left (you have ${item.quantity}).`);
+              }
+            } else if (!isUnlimited) {
+              await RestApi.updateDocument("menu_items", item.menu_item_id, {
+                stock_quantity: Math.max(0, (menuItem.stock_quantity || 0) - item.quantity),
+                last_verified: new Date().toISOString(),
+              });
+            }
+          }
+        } catch {
+          issues.push(`Could not verify stock for ${item.name}.`);
+        }
+      }
+    },
+  );
+
+  const result = { valid: issues.length === 0, issues };
+  log.info("Stock validation result", { valid: result.valid, issueCount: result.issues.length });
+  return result;
+}
+
+// ==================== REVIEWS ====================
+
+export async function addReview(data: Omit<Review, "id" | "created_at">): Promise<{ id: string }> {
+  const payload = { ...data, created_at: new Date() };
+  return firestoreOp(
+    async () => {
+      const ref = await addDoc(collection(db, "reviews"), payload);
+      return { id: ref.id };
+    },
+    async () => {
+      const id = await RestApi.createDocument("reviews", payload);
+      return { id };
+    },
+  );
+}
+
+export async function getReviews(menuItemId?: string): Promise<Review[]> {
+  if (menuItemId) {
+    return firestoreOp(
+      async () => {
+        const q = query(
+          collection(db, "reviews"),
+          where("menu_item_id", "==", menuItemId),
+          orderBy("created_at", "desc"),
+        );
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Review[];
+      },
+      async () => {
+        const data = await RestApi.queryCollection("reviews", "menu_item_id", "==", menuItemId);
+        return data as Review[];
+      },
+    );
+  }
+
+  return firestoreOp(
+    async () => {
+      const q = query(collection(db, "reviews"), orderBy("created_at", "desc"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Review[];
+    },
+    async () => {
+      const data = await RestApi.getCollection("reviews", "created_at");
+      return data as Review[];
+    },
+  );
+}
+
+export async function deleteReview(id: string): Promise<void> {
+  return firestoreOp(
+    async () => { await deleteDoc(doc(db, "reviews", id)); },
+    async () => { await RestApi.deleteDocument("reviews", id); },
+  );
+}
+
+// ==================== FAVORITES ====================
+
+export async function getFavorites(userId: string): Promise<Favorite[]> {
+  return firestoreOp(
+    async () => {
+      const q = query(
+        collection(db, "favorites"),
+        where("user_id", "==", userId),
+        orderBy("created_at", "desc"),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Favorite[];
+    },
+    async () => {
+      const data = await RestApi.queryCollection("favorites", "user_id", "==", userId);
+      return data as Favorite[];
+    },
+  );
+}
+
+export async function addFavorite(userId: string, menuItemId: string): Promise<void> {
+  const existing = await getFavorites(userId);
+  if (existing.some((f) => f.menu_item_id === menuItemId)) return;
+
+  const payload = { user_id: userId, menu_item_id: menuItemId, created_at: new Date() };
+  await firestoreOp(
+    async () => { await addDoc(collection(db, "favorites"), payload); },
+    async () => { await RestApi.createDocument("favorites", payload); },
+  );
+}
+
+export async function removeFavorite(userId: string, menuItemId: string): Promise<void> {
+  const favs = await getFavorites(userId);
+  const toDelete = favs.filter((f) => f.menu_item_id === menuItemId);
+  for (const f of toDelete) {
+    await firestoreOp(
+      async () => { await deleteDoc(doc(db, "favorites", f.id)); },
+      async () => { await RestApi.deleteDocument("favorites", f.id); },
+    );
+  }
+}
+
+export async function isFavorited(userId: string, menuItemId: string): Promise<boolean> {
+  const favs = await getFavorites(userId);
+  return favs.some((f) => f.menu_item_id === menuItemId);
+}
+
+export async function getFavoritesWithItems(userId: string): Promise<MenuItem[]> {
+  const favs = await getFavorites(userId);
+  const items = await Promise.all(
+    favs.map(async (f) => {
+      const item = await getMenuItem(f.menu_item_id);
+      return item;
+    }),
+  );
+  return items.filter((i): i is MenuItem => i !== null);
+}
+
+// ==================== FAVORITE COLLECTIONS ====================
+
+export async function getFavoriteCollections(userId: string): Promise<{ id: string; name: string; count: number }[]> {
+  return firestoreOp(
+    async () => {
+      const q = query(collection(db, "favorite_collections"), where("user_id", "==", userId));
+      const snapshot = await getDocs(q);
+      const cols = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+      const favs = await getFavorites(userId);
+      return cols.map((c) => ({
+        id: c.id,
+        name: c.name,
+        count: favs.filter((f) => f.collection_id === c.id).length,
+      }));
+    },
+    async () => {
+      const data = await RestApi.queryCollection("favorite_collections", "user_id", "==", userId);
+      const favs = await getFavorites(userId);
+      return (data as any[]).map((c) => ({
+        id: c.id,
+        name: c.name,
+        count: favs.filter((f: any) => f.collection_id === c.id).length,
+      }));
+    },
+  );
+}
+
+export async function createFavoriteCollection(userId: string, name: string): Promise<{ id: string }> {
+  const payload = { user_id: userId, name, created_at: new Date() };
+  return firestoreOp(
+    async () => {
+      const ref = await addDoc(collection(db, "favorite_collections"), payload);
+      return { id: ref.id };
+    },
+    async () => {
+      const result = await RestApi.createDocument("favorite_collections", payload);
+      return { id: typeof result === "string" ? result : (result as any).id || "" };
+    },
+  );
+}
+
+export async function moveFavoriteToCollection(userId: string, menuItemId: string, collectionId: string): Promise<void> {
+  const favs = await getFavorites(userId);
+  const fav = favs.find((f) => f.menu_item_id === menuItemId);
+  if (!fav) return;
+  await firestoreOp(
+    async () => { await updateDoc(doc(db, "favorites", fav.id), { collection_id: collectionId || null }); },
+    async () => { await RestApi.updateDocument("favorites", fav.id, { collection_id: collectionId || null }); },
+  );
+}
+
+// ==================== SETTINGS ====================
+
+const SETTINGS_DOC = "app_settings";
+
+export async function getSettings(): Promise<AppSettings> {
+  const defaults: AppSettings = {
+    delivery_fee: 50,
+    delivery_radius_km: 10,
+    gcash_enabled: false,
+    gcash_number: "",
+    gcash_qr_image: "",
+    store_name: "FoodFix",
+    store_address: "P. Herrera St, Batangas City, 4200 Batangas",
+    store_phone: "",
+    store_lat: 14.031902,
+    store_lng: 121.206633,
+  };
+
+  try {
+    const data = await firestoreOp(
+      async () => {
+        const snap = await getDoc(doc(db, "settings", SETTINGS_DOC));
+        return snap.exists() ? snap.data() : null;
+      },
+      async () => await RestApi.getDocument("settings", SETTINGS_DOC),
+    );
+    return data ? { ...defaults, ...data } as AppSettings : defaults;
+  } catch {
+    return defaults;
+  }
+}
+
+export async function updateSettings(data: Partial<AppSettings>): Promise<void> {
+  return firestoreOp(
+    async () => { await setDoc(doc(db, "settings", SETTINGS_DOC), data, { merge: true }); },
+    async () => { await RestApi.updateDocument("settings", SETTINGS_DOC, data); },
+  );
+}
+
+// ==================== SALES REPORT ====================
+
+export async function getSalesReport(dateFrom?: string, dateTo?: string): Promise<{
+  total_orders: number;
+  total_revenue: number;
+  items_sold: { name: string; quantity: number; revenue: number }[];
+  orders_by_status: Record<string, number>;
+  orders_by_type: Record<string, number>;
+}> {
+  const orders = await getOrders();
+
+  let filtered = orders.filter((o) => o.status === "delivered");
+  if (dateFrom) {
+    filtered = filtered.filter((o) => {
+      const d = o.created_at && "seconds" in o.created_at
+        ? new Date(o.created_at.seconds * 1000).toISOString().slice(0, 10)
+        : "";
+      return d >= dateFrom;
+    });
+  }
+  if (dateTo) {
+    filtered = filtered.filter((o) => {
+      const d = o.created_at && "seconds" in o.created_at
+        ? new Date(o.created_at.seconds * 1000).toISOString().slice(0, 10)
+        : "";
+      return d <= dateTo;
+    });
+  }
+
+  const itemsMap = new Map<string, { name: string; quantity: number; revenue: number }>();
+  for (const order of filtered) {
+    for (const item of order.items || []) {
+      const existing = itemsMap.get(item.name) || { name: item.name, quantity: 0, revenue: 0 };
+      existing.quantity += item.quantity;
+      existing.revenue += item.price * item.quantity;
+      itemsMap.set(item.name, existing);
+    }
+  }
+
+  const statusCount: Record<string, number> = {};
+  const typeCount: Record<string, number> = {};
+  for (const o of orders) {
+    statusCount[o.status] = (statusCount[o.status] || 0) + 1;
+    typeCount[o.order_type] = (typeCount[o.order_type] || 0) + 1;
+  }
+
+  return {
+    total_orders: filtered.length,
+    total_revenue: filtered.reduce((sum, o) => sum + (o.total || 0), 0),
+    items_sold: Array.from(itemsMap.values()).sort((a, b) => b.quantity - a.quantity),
+    orders_by_status: statusCount,
+    orders_by_type: typeCount,
+  };
+}
+
+// ==================== INVENTORY ALERTS ====================
+
+export async function getLowStockItems(threshold = 10): Promise<MenuItem[]> {
+  const items = await getMenuItems();
+  return items.filter((i) => i.stock_quantity <= threshold);
+}
+
+// ==================== STAFF HELPERS ====================
+
+export async function getStaffProfiles(): Promise<Profile[]> {
+  return firestoreOp(
+    async () => {
+      const q = query(collection(db, "profiles"), where("role", "==", "staff"));
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as Profile[];
+    },
+    async () => {
+      const data = await RestApi.getCollection("profiles", "created_at");
+      return (data as Profile[]).filter((p) => p.role === "staff");
+    },
+  );
+}
+
+// ==================== LIVE LOCATION ====================
+
+export async function upsertLocation(
+  orderId: string,
+  userId: string,
+  role: "customer" | "staff",
+  coords: { lat: number; lng: number; heading?: number; speed?: number; accuracy?: number },
+): Promise<void> {
+  return firestoreOp(
+    async () => {
+      const { serverTimestamp } = await import("firebase/firestore");
+      await setDoc(
+        doc(db, "orders", orderId, "locations", role),
+        { user_id: userId, role, ...coords, updated_at: serverTimestamp() },
+        { merge: true },
+      );
+    },
+    async () => {
+      await RestApi.updateDocument(`orders/${orderId}/locations`, role, {
+        user_id: userId, role, ...coords, updated_at: new Date().toISOString(),
+      });
+    },
+  );
+}
+
+export function onLocationUpdate(
+  orderId: string,
+  role: "customer" | "staff",
+  callback: (loc: LiveLocation | null) => void,
+): () => void {
+  try {
+    const { onSnapshot: firestoreOnSnapshot } = require("firebase/firestore");
+    const locRef = doc(db, "orders", orderId, "locations", role === "staff" ? "staff" : "customer");
+    const unsub = firestoreOnSnapshot(locRef, (snap: any) => {
+      if (snap.exists()) callback({ ...snap.data() } as LiveLocation);
+      else callback(null);
+    });
+    return unsub;
+  } catch {
+    return () => {};
+  }
+}
+
+export function onOrderUpdate(
+  orderId: string,
+  callback: (order: Order | null) => void,
+): () => void {
+  try {
+    const { onSnapshot: firestoreOnSnapshot } = require("firebase/firestore");
+    const orderRef = doc(db, "orders", orderId);
+    const unsub = firestoreOnSnapshot(orderRef, (snap: any) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const order: Order = {
+          id: snap.id,
+          ...data,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
+          items: data.items || [],
+        };
+        callback(order);
+      } else {
+        callback(null);
+      }
+    });
+    return unsub;
+  } catch {
+    return () => {};
+  }
+}
+
+export function onOrdersByUserUpdate(
+  userId: string,
+  callback: (orders: Order[]) => void,
+): () => void {
+  try {
+    const { onSnapshot: firestoreOnSnapshot } = require("firebase/firestore");
+    const q = query(collection(db, "orders"), where("customer_id", "==", userId));
+    const unsub = firestoreOnSnapshot(q, (snapshot: any) => {
+      const orders = snapshot.docs.map((d: any) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Order[];
+      const toSeconds = (value: any): number => {
+        if (!value) return 0;
+        if (typeof value?.seconds === "number") return value.seconds;
+        const ms = new Date(value).getTime();
+        return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+      };
+      orders.sort((a, b) => toSeconds(b.created_at) - toSeconds(a.created_at));
+      callback(orders);
+    }, (error: any) => {
+      log.warn("onOrdersByUserUpdate listener error", error);
+    });
+    return unsub;
+  } catch {
+    return () => {};
+  }
+}
+
+export function onAllOrdersUpdate(
+  callback: (orders: Order[]) => void,
+): () => void {
+  try {
+    const { onSnapshot: firestoreOnSnapshot } = require("firebase/firestore");
+    const q = query(collection(db, "orders"));
+    const unsub = firestoreOnSnapshot(q, (snapshot: any) => {
+      const orders = snapshot.docs.map((d: any) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Order[];
+      // FIFO queue: oldest order first ("first to place, first to get").
+      orders.sort((a, b) => toEpochSeconds(a.created_at) - toEpochSeconds(b.created_at));
+      callback(orders);
+    }, (error: any) => {
+      log.warn("onAllOrdersUpdate listener error", error);
+    });
+    return unsub;
+  } catch {
+    return () => {};
+  }
+}
+
+export interface OrderQueueStatus {
+  queuePosition: number;
+  ordersAhead: number;
+  statusMessage: string;
+}
+
+/**
+ * Computes live customer queue position for active orders.
+ * Orders are evaluated in FIFO sequence (oldest first).
+ */
+export function computeOrderQueuePosition(orderId: string, allOrders: Order[]): OrderQueueStatus | null {
+  const activeQueue = allOrders.filter(
+    (o) => o.status === "pending" || o.status === "accepted" || o.status === "preparing"
+  );
+  const sorted = sortOldestFirst(activeQueue);
+  const idx = sorted.findIndex((o) => o.id === orderId);
+  if (idx === -1) return null;
+
+  const queuePosition = idx + 1;
+  const ordersAhead = idx;
+  const order = sorted[idx];
+
+  let statusMessage = "";
+  if (order.status === "preparing") {
+    statusMessage = ordersAhead === 0
+      ? "Now preparing in the kitchen!"
+      : `Preparing soon (${ordersAhead} order${ordersAhead > 1 ? "s" : ""} ahead)`;
+  } else if (order.status === "accepted") {
+    statusMessage = ordersAhead === 0
+      ? "You're next in line!"
+      : `${ordersAhead} order${ordersAhead > 1 ? "s" : ""} ahead in queue`;
+  } else {
+    statusMessage = ordersAhead === 0
+      ? "First in queue, awaiting confirmation"
+      : `Queue #${queuePosition} (${ordersAhead} order${ordersAhead > 1 ? "s" : ""} ahead)`;
+  }
+
+  return { queuePosition, ordersAhead, statusMessage };
+}
+
+export async function setLocationOptIn(
+  orderId: string,
+  field: "customer_location_opt_in" | "staff_location_opt_in" | "location_sharing_enabled" | "driver_id",
+  value: boolean | string,
+): Promise<void> {
+  return firestoreOp(
+    async () => { await updateDoc(doc(db, "orders", orderId), { [field]: value }); },
+    async () => { await RestApi.updateDocument("orders", orderId, { [field]: value }); },
+  );
+}
+
+export async function cleanupArchivedOrders(): Promise<void> {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const cutoff = thirtyDaysAgo.toISOString();
+
+  const orders = await getOrders();
+  for (const order of orders) {
+    if ((order as any).archived && (order as any).archived_at && (order as any).archived_at < cutoff) {
+      await firestoreOp(
+        async () => { await deleteDoc(doc(db, "orders", order.id)); },
+        async () => { await RestApi.deleteDocument("orders", order.id); },
+      );
+    }
+  }
+}
+// ==================== SAVED ADDRESSES ====================
+
+export interface SavedAddress {
+  id: string;
+  label: string;
+  address: string;
+  phone: string;
+  lat?: number;
+  lng?: number;
+}
+
+export async function getSavedAddresses(userId: string): Promise<SavedAddress[]> {
+  return firestoreOp(
+    async () => {
+      const q = query(
+        collection(db, "profiles", userId, "saved_addresses"),
+        orderBy("created_at", "desc"),
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as SavedAddress[];
+    },
+    async () => {
+      const data = await RestApi.getCollection(`profiles/${userId}/saved_addresses`, "created_at");
+      return data as SavedAddress[];
+    },
+  );
+}
+
+export async function saveAddress(
+  userId: string,
+  address: Omit<SavedAddress, "id">,
+): Promise<{ id: string }> {
+  const payload = { ...address, created_at: new Date() };
+  return firestoreOp(
+    async () => {
+      const ref = await addDoc(collection(db, "profiles", userId, "saved_addresses"), payload);
+      return { id: ref.id };
+    },
+    async () => {
+      const id = await RestApi.createDocument(`profiles/${userId}/saved_addresses`, payload);
+      return { id };
+    },
+  );
+}
+
+export async function deleteSavedAddress(userId: string, addressId: string): Promise<void> {
+  return firestoreOp(
+    async () => {
+      await deleteDoc(doc(db, "profiles", userId, "saved_addresses", addressId));
+    },
+    async () => {
+      await RestApi.deleteDocument(`profiles/${userId}/saved_addresses`, addressId);
+    },
+  );
+}
+
+export interface Banner {
+  id: string;
+  name: string;
+  imageUrl: string;
+  active: boolean;
+  createdAt: Date;
+}
+
+export async function getBanners(): Promise<Banner[]> {
+  try {
+    const raw = await firestoreOp(
+      async () => {
+        const q = query(collection(db, "banners"), where("active", "==", true));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            name: data.name || "",
+            imageUrl: data.imageUrl || "",
+            active: data.active ?? true,
+            createdAt: data.createdAt?.toDate?.() || new Date(),
+          };
+        });
+      },
+      async () => {
+        const data = await RestApi.getCollection("banners");
+        return data.map((d: any) => ({
+          id: d.id,
+          name: d.name || "",
+          imageUrl: d.imageUrl || "",
+          active: d.active ?? true,
+          createdAt: d.createdAt ? new Date(d.createdAt) : new Date(),
+        })).filter((b: any) => b.active === true);
+      }
+    );
+    return raw as Banner[];
+  } catch (error) {
+    console.error("Error fetching banners:", error);
+    return [];
+  }
+}
+
+// ==================== GCASH NOTIFICATIONS ====================
+
+export async function notifyGcashPayment(
+  orderId: string,
+  customerName: string,
+  customerPhone: string,
+  amount: number,
+  opts?: { customerId?: string; orderNumber?: string },
+): Promise<{ viaNotification: boolean; viaChat: boolean }> {
+  log.info("Notifying GCash payment", { orderId, amount, customerName });
+  const orderLabel = opts?.orderNumber || orderId;
+  const payload = {
+    type: "gcash_payment",
+    order_id: orderId,
+    order_number: orderLabel,
+    customer_id: opts?.customerId || null,
+    customer_name: customerName,
+    customer_phone: customerPhone,
+    amount,
+    paid: false,
+    created_at: new Date(),
+  };
+
+  let viaNotification = false;
+  let viaChat = false;
+  let lastError: any = null;
+
+  // Channel 1: admin transaction record (needs current Firestore rules).
+  try {
+    await firestoreOp(
+      async () => { await addDoc(collection(db, "notifications"), payload); },
+      async () => { await RestApi.createDocument("notifications", payload); },
+    );
+    viaNotification = true;
+    log.info("GCash payment notification sent", { orderId });
+  } catch (e) {
+    lastError = e;
+    log.warn("GCash notification write failed, falling back to chat message", e);
+  }
+
+  // Channel 2: chat message to the store. The messages collection is readable
+  // by admin/staff, so the store still sees the payment even when the
+  // notifications write is blocked by outdated security rules.
+  if (opts?.customerId) {
+    try {
+      await sendMessage({
+        conversation_id: opts.customerId,
+        sender_id: opts.customerId,
+        sender_name: customerName,
+        sender_role: "customer",
+        content: `GCash payment sent: P${Number(amount).toFixed(2)} for order ${orderLabel}. Please verify. Thank you!`,
+      });
+      viaChat = true;
+      log.info("GCash payment chat message sent", { orderId });
+    } catch (e) {
+      lastError = e;
+      log.warn("GCash chat fallback failed", e);
+    }
+  }
+
+  if (!viaNotification && !viaChat) {
+    log.error("GCash payment notification failed on all channels", lastError);
+    throw lastError;
+  }
+  return { viaNotification, viaChat };
+}
+
+export async function markGcashPaid(notificationId: string): Promise<void> {
+  log.info("Marking GCash as paid", { notificationId });
+  try {
+    await firestoreOp(
+      async () => { await updateDoc(doc(db, "notifications", notificationId), { paid: true, paid_at: new Date() }); },
+      async () => { await RestApi.updateDocument("notifications", notificationId, { paid: true, paid_at: new Date().toISOString() }); },
+    );
+    log.info("GCash marked as paid", { notificationId });
+  } catch (e) {
+    log.error("Failed to mark GCash as paid", e);
+    throw e;
+  }
+}
+
+// ==================== REFUND SYSTEM ====================
+
+export async function requestRefund(orderId: string, reason: string, imageUrl?: string): Promise<void> {
+  log.info("Requesting refund", { orderId, reason });
+  const updates: any = {
+    refund_status: "pending",
+    refund_reason: reason,
+    refund_image_url: imageUrl || null,
+    updated_at: new Date(),
+  };
+  await firestoreOp(
+    async () => { await updateDoc(doc(db, "orders", orderId), updates); },
+    async () => { await RestApi.updateDocument("orders", orderId, updates); },
+  );
+  try {
+    const notifPayload = {
+      type: "refund_request",
+      order_id: orderId,
+      reason,
+      created_at: new Date(),
+    };
+    await firestoreOp(
+      async () => { await addDoc(collection(db, "notifications"), notifPayload); },
+      async () => { await RestApi.createDocument("notifications", notifPayload); },
+    );
+    log.info("Refund request notification sent", { orderId });
+  } catch (e) {
+    log.warn("Refund notification failed (non-critical)", e);
+  }
+}
+
+export async function processRefund(
+  orderId: string,
+  status: "approved" | "completed" | "rejected",
+  extra?: { refund_rejection_reason?: string; refund_account_name?: string; refund_account_number?: string; refund_method?: string },
+): Promise<void> {
+  log.info("Processing refund", { orderId, status });
+  const updates: any = {
+    refund_status: status,
+    updated_at: new Date(),
+    ...extra,
+  };
+  await firestoreOp(
+    async () => { await updateDoc(doc(db, "orders", orderId), updates); },
+    async () => { await RestApi.updateDocument("orders", orderId, updates); },
+  );
+
+  // Notify the customer about the refund decision
+  let customer_id: string | undefined;
+  try {
+    const orderDoc = await firestoreOp(
+      async () => { const snap = await getDoc(doc(db, "orders", orderId)); return snap.exists() ? snap.data() : null; },
+      async () => { return await RestApi.getDocument("orders", orderId); },
+    );
+    customer_id = (orderDoc as any)?.customer_id;
+  } catch {}
+
+  if (customer_id) {
+    const notifPayload = {
+      type: "refund_update",
+      order_id: orderId,
+      customer_id,
+      refund_status: status,
+      created_at: new Date(),
+    };
+    await firestoreOp(
+      async () => { await addDoc(collection(db, "notifications"), notifPayload); },
+      async () => { await RestApi.createDocument("notifications", notifPayload); },
+    );
+  }
+}
+
+// ==================== EMAIL VERIFICATION CODE ====================
+
+export async function generateEmailCode(email: string): Promise<string> {
+  log.info("Generating email verification code", { email });
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  const payload = { email, code, expires_at: expiresAt.toISOString(), created_at: new Date() };
+  try {
+    const result = await firestoreOp(
+    async () => {
+      const q = query(collection(db, "email_verifications"), where("email", "==", email));
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        await deleteDoc(doc(db, "email_verifications", d.id));
+      }
+      await addDoc(collection(db, "email_verifications"), payload);
+      return code;
+    },
+    async () => {
+      const data = await RestApi.queryCollection("email_verifications", "email", "==", email);
+      for (const d of data as any[]) {
+        await RestApi.deleteDocument("email_verifications", d.id);
+      }
+      await RestApi.createDocument("email_verifications", payload);
+      return code;
+    },
+  );
+    log.info("Email verification code generated", { email });
+    return result;
+  } catch (e) {
+    log.error("Failed to generate email verification code", e);
+    throw e;
+  }
+}
+
+export async function verifyEmailCode(email: string, code: string, userId?: string): Promise<boolean> {
+  log.info("Verifying email code", { email, userId });
+  try {
+    const result = await firestoreOp(
+      async () => {
+        const q = query(
+          collection(db, "email_verifications"),
+          where("email", "==", email),
+          where("code", "==", code),
+        );
+        const snap = await getDocs(q);
+        if (snap.empty) return false;
+        for (const d of snap.docs) {
+          const data = d.data();
+          if (data.expires_at && new Date(data.expires_at) < new Date()) {
+            return false;
+          }
+          await deleteDoc(doc(db, "email_verifications", d.id));
+        }
+        if (userId) {
+          await updateDoc(doc(db, "profiles", userId), { email_verified: true });
+        }
+        return true;
+      },
+      async () => {
+        const data = await RestApi.queryCollection("email_verifications", "email", "==", email);
+        const matches = (data as any[]).filter((d: any) => d.code === code);
+        if (matches.length === 0) return false;
+        const match = matches[0];
+        if (match.expires_at && new Date(match.expires_at) < new Date()) {
+          return false;
+        }
+        await RestApi.deleteDocument("email_verifications", match.id);
+        if (userId) {
+          await RestApi.updateDocument("profiles", userId, { email_verified: true });
+        }
+        return true;
+      },
+    );
+    if (result) {
+      log.info("Email code verified successfully", { email });
+    } else {
+      log.warn("Email code verification failed", { email });
+    }
+    return result;
+  } catch (e) {
+    log.error("Email code verification error", e);
+    throw e;
+  }
+}
+
+// ==================== INVENTORY ADJUSTMENTS ====================
+
+export interface InventoryAdjustment {
+  id: string;
+  item_id: string;
+  item_name: string;
+  previous_qty: number;
+  adjustment: number;
+  reason: "spoilage" | "expired" | "damaged" | "lost" | "returned" | "restock";
+  notes?: string;
+  admin_id: string;
+  created_at: Timestamp | { seconds: number };
+}
+
+export async function addInventoryAdjustment(
+  data: Omit<InventoryAdjustment, "id" | "created_at">,
+): Promise<{ id: string }> {
+  log.info("Adding inventory adjustment", { item_id: data.item_id, item_name: data.item_name, adjustment: data.adjustment, reason: data.reason });
+  const payload = { ...data, created_at: new Date() };
+  return firestoreOp(
+    async () => {
+      const ref = await addDoc(collection(db, "inventory_adjustments"), payload);
+      try {
+        await updateDoc(doc(db, "menu_items", data.item_id), {
+          stock_quantity: Math.max(0, data.previous_qty + data.adjustment),
+        });
+      } catch (e) {
+        // Roll back the adjustment record so history never shows a
+        // change that was not actually applied to the stock level.
+        await deleteDoc(ref).catch(() => {});
+        throw e;
+      }
+      return { id: ref.id };
+    },
+    async () => {
+      const id = await RestApi.createDocument("inventory_adjustments", payload);
+      try {
+        await RestApi.updateDocument("menu_items", data.item_id, {
+          stock_quantity: Math.max(0, data.previous_qty + data.adjustment),
+        });
+      } catch (e) {
+        await RestApi.deleteDocument("inventory_adjustments", id).catch(() => {});
+        throw e;
+      }
+      return { id };
+    },
+  );
+}
+
+export async function getInventoryAdjustments(
+  itemId?: string,
+): Promise<InventoryAdjustment[]> {
+  log.debug("Fetching inventory adjustments", { itemId });
+  return firestoreOp(
+    async () => {
+      let q;
+      if (itemId) {
+        q = query(collection(db, "inventory_adjustments"), where("item_id", "==", itemId));
+      } else {
+        q = query(collection(db, "inventory_adjustments"), orderBy("created_at", "desc"));
+      }
+      const snap = await getDocs(q);
+      const results = snap.docs.map((d) => ({ id: d.id, ...d.data() } as InventoryAdjustment));
+      return results.sort((a, b) => {
+        const ta = (a.created_at as any)?.seconds || 0;
+        const tb = (b.created_at as any)?.seconds || 0;
+        return tb - ta;
+      });
+    },
+    async () => {
+      let data = await RestApi.queryCollection("inventory_adjustments", "item_id", "!=", "__nonexistent__");
+      data = (data as any[]).filter((d: any) => d.item_id !== undefined);
+      let result = (data as any[]).map((d: any) => ({ ...d })) as InventoryAdjustment[];
+      if (itemId) result = result.filter((r) => r.item_id === itemId);
+      return result.sort((a, b) => {
+        const ta = (a.created_at as any)?.seconds || 0;
+        const tb = (b.created_at as any)?.seconds || 0;
+        return tb - ta;
+      });
+    },
+  );
+}
+
+// ==================== LAMION AI RAG DATA ====================
+
+export interface LamionRagKnowledge {
+  id: string;
+  chunk_id: string;
+  dish_topic: string;
+  title: string;
+  category: string;
+  regional_origin: string;
+  chunk_content: string;
+  keywords: string[];
+  embedding_dim: number;
+  embedding_preview: number[];
+  source_reference: string;
+  created_at: string;
+}
+
+export interface LamionAiLog {
+  id: string;
+  query_id: string;
+  timestamp: string;
+  user_query: string;
+  retrieved_chunk_ids: string[];
+  cosine_similarity_scores: Record<string, number>;
+  top_similarity_score: number;
+  retrieved_context_preview: string;
+  guardrail_check: string;
+  model_used: string;
+  ai_response: string;
+  latency_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+export async function getLamionRagKnowledge(): Promise<LamionRagKnowledge[]> {
+  return firestoreOp(
+    async () => {
+      const snap = await getDocs(collection(db, "lamion_rag_knowledge"));
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as LamionRagKnowledge[];
+    },
+    async () => {
+      const data = await RestApi.getCollection("lamion_rag_knowledge", "chunk_id");
+      return (data as any[]).map((d) => ({ id: d.id, ...d })) as LamionRagKnowledge[];
+    },
+  );
+}
+
+export async function getLamionAiLogs(): Promise<LamionAiLog[]> {
+  return firestoreOp(
+    async () => {
+      const snap = await getDocs(collection(db, "lamion_ai_logs"));
+      const logs = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as LamionAiLog[];
+      return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    },
+    async () => {
+      const data = await RestApi.getCollection("lamion_ai_logs", "timestamp");
+      const logs = (data as any[]).map((d) => ({ id: d.id, ...d })) as LamionAiLog[];
+      return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    },
+  );
+}
+
