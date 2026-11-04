@@ -1,7 +1,7 @@
 // Firebase Configuration for FoodFix Mobile
 // With REST API fallback for web browsers with ad blockers
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getApp, getApps, initializeApp } from "firebase/app";
+import { deleteApp, getApp, getApps, initializeApp } from "firebase/app";
 import * as FirebaseAuth from "firebase/auth";
 import {
     createUserWithEmailAndPassword,
@@ -316,10 +316,6 @@ export async function createStaffAccount(
   username: string,
   phone?: string,
 ) {
-  // Note: We cannot retrieve the admin's password from Firebase Auth for security reasons
-  // The admin will need to re-login after creating a staff account
-  // This is a Firebase limitation - we'll handle it gracefully
-
   // Check if email already exists in Auth
   try {
     const methods = await fetchSignInMethodsForEmail(auth, email);
@@ -330,24 +326,38 @@ export async function createStaffAccount(
     if (error.code === 'auth/invalid-email') {
       throw new Error('Invalid email address.');
     }
-    // If it's not the email-already-in-use error, continue (might be a different error)
-    if (!error.message.includes('already registered')) {
-      // Continue - email might not exist
-    } else {
+    if (error.message?.includes('already registered')) {
       throw error;
     }
   }
 
-  // Create the staff account (this will change the current auth user)
-  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-  const staffUid = userCredential.user.uid;
+  // Create staff credentials using a temporary secondary app instance
+  // so the administrator's primary session remains active and authenticated.
+  let staffUid = "";
+  let secondaryApp: any = null;
+  try {
+    const secondaryAppName = `StaffCreation_${Date.now()}`;
+    secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+    const secondaryAuth = getAuth(secondaryApp);
+    const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    staffUid = userCredential.user.uid;
+    try {
+      await signOut(secondaryAuth);
+    } catch {}
+  } finally {
+    if (secondaryApp) {
+      try {
+        await deleteApp(secondaryApp);
+      } catch {}
+    }
+  }
 
-  // Refresh REST auth token to the newly-created staff user context
-  // so profile creation works consistently across SDK/REST fallback paths.
-  const token = await userCredential.user.getIdToken(true);
-  RestApi.setAuthToken(token);
+  if (!staffUid) {
+    throw new Error("Failed to create staff credentials in Firebase Auth.");
+  }
 
-  // Create staff profile
+  // Create staff profile with role: 'staff'.
+  // This write executes under the Admin's active session, passing isAdmin() in Firestore rules.
   const profileData = {
     email,
     username,
@@ -368,12 +378,8 @@ export async function createStaffAccount(
     await RestApi.setDocument("profiles", staffUid, profileData);
   }
 
-  // Sign out the newly created staff user
-  await signOut(auth);
-  RestApi.setAuthToken(null);
-
-  // Return info about the created staff account
-  return { staffUid, email, needsReauth: true };
+  // Return info about the created staff account (admin session is preserved)
+  return { staffUid, email, needsReauth: false };
 }
 
 export async function logOut() {

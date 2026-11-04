@@ -135,13 +135,10 @@ export default function AdminMoreScreen() {
     setCreatingStaff(true);
     try {
       await createStaffAccount(staffForm.email.trim(), staffForm.password, staffForm.name.trim(), staffForm.phone.trim());
-      Alert.alert(
-        "Success",
-        `Staff account created for ${staffForm.name.trim()}!\n\nPlease log in again as admin to continue.`,
-        [{ text: "OK", onPress: () => router.replace("/(auth)/welcome") }],
-      );
+      Alert.alert("Success", `Staff account created for ${staffForm.name.trim()}!`);
       setStaffModal(false);
       setStaffForm({ name: "", email: "", password: "", phone: "" });
+      await loadAll();
     } catch (e: any) {
       const errStr = (e?.message || e?.code || "").toLowerCase();
       const isEmailInUse = errStr.includes("email-already-in-use") || errStr.includes("already registered");

@@ -16,7 +16,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-    getCurrentUser,
     getProfile,
     resetPassword,
     signIn,
@@ -126,7 +125,7 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <ScrollView
@@ -364,7 +363,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9F0DC" },
-  scroll: { flexGrow: 1, justifyContent: "center", padding: 24 },
+  scroll: { flexGrow: 1, justifyContent: "center", padding: 24, paddingBottom: 60 },
   card: {
     backgroundColor: "#fff",
     borderRadius: 24,

@@ -520,9 +520,24 @@ export default function MenuScreen() {
               )}
               <Text style={styles.itemModalPrice}>P{selectedItem?.price?.toFixed(2)}</Text>
 
-              {selectedItem?.is_made_to_order && (
-                <View style={styles.madeToOrderTag}>
-                  <Text style={styles.madeToOrderText}>Made to Order</Text>
+              {/* Stock Availability Badge */}
+              {selectedItem?.is_made_to_order || selectedItem?.batch_date ? (
+                <View style={[styles.stockBadge, { backgroundColor: "#E8F8F5" }]}>
+                  <Ionicons name="infinite" size={14} color="#00A86B" />
+                  <Text style={[styles.stockBadgeText, { color: "#00A86B" }]}>Made to Order (Unlimited)</Text>
+                </View>
+              ) : (
+                <View style={[styles.stockBadge, { backgroundColor: (selectedItem?.stock_quantity ?? 0) > 5 ? "#E8F8F5" : (selectedItem?.stock_quantity ?? 0) > 0 ? "#FEF3EB" : "#FDEDEC" }]}>
+                  <Ionicons
+                    name={(selectedItem?.stock_quantity ?? 0) > 0 ? "cube-outline" : "alert-circle-outline"}
+                    size={14}
+                    color={(selectedItem?.stock_quantity ?? 0) > 5 ? "#00A86B" : (selectedItem?.stock_quantity ?? 0) > 0 ? "#F25C05" : "#E74C3C"}
+                  />
+                  <Text style={[styles.stockBadgeText, { color: (selectedItem?.stock_quantity ?? 0) > 5 ? "#00A86B" : (selectedItem?.stock_quantity ?? 0) > 0 ? "#F25C05" : "#E74C3C" }]}>
+                    {(selectedItem?.stock_quantity ?? 0) > 0
+                      ? `Stock: ${selectedItem?.stock_quantity} available`
+                      : "Out of Stock"}
+                  </Text>
                 </View>
               )}
 
@@ -579,10 +594,19 @@ export default function MenuScreen() {
                   </TouchableOpacity>
                   <Text style={styles.qtyVal}>{selectedQty}</Text>
                   <TouchableOpacity 
-                    style={styles.qtyBtn} 
+                    style={[
+                      styles.qtyBtn,
+                      !(selectedItem?.is_made_to_order || selectedItem?.batch_date) &&
+                        selectedQty >= (selectedItem?.stock_quantity || 0) && { opacity: 0.4 }
+                    ]} 
                     onPress={() => {
-                      const max = selectedItem?.is_made_to_order || selectedItem?.batch_date ? 99 : (selectedItem?.stock_quantity || 99);
-                      setSelectedQty(Math.min(max, selectedQty + 1));
+                      const isUnlimited = selectedItem?.is_made_to_order || selectedItem?.batch_date;
+                      const max = isUnlimited ? 99 : (selectedItem?.stock_quantity || 0);
+                      if (!isUnlimited && selectedQty >= max) {
+                        Alert.alert("Stock Limit", `Only ${max} available in stock.`);
+                        return;
+                      }
+                      setSelectedQty(Math.min(max || 99, selectedQty + 1));
                     }}
                   >
                     <Ionicons name="add" size={20} color="#F25C05" />
@@ -591,7 +615,16 @@ export default function MenuScreen() {
               </View>
 
               <View style={styles.modalActionRow}>
-                {selectedItem && (cartMap[selectedItem.id] || 0) > 0 ? (
+                {!(selectedItem?.is_made_to_order || selectedItem?.batch_date) && (selectedItem?.stock_quantity ?? 0) <= 0 ? (
+                  <>
+                    <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setSelectedItem(null)}>
+                      <Text style={styles.modalCancelText}>Close</Text>
+                    </TouchableOpacity>
+                    <View style={[styles.modalAddBtn, { backgroundColor: "#ccc" }]}>
+                      <Text style={styles.modalAddText}>Out of Stock</Text>
+                    </View>
+                  </>
+                ) : selectedItem && (cartMap[selectedItem.id] || 0) > 0 ? (
                   <>
                     <TouchableOpacity style={styles.modalRemoveBtn} onPress={handleRemoveFromCart}>
                       <Ionicons name="trash-outline" size={16} color="#E74C3C" />
@@ -807,6 +840,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginBottom: 10,
   },
   madeToOrderText: { fontSize: 11, color: "#fff", fontWeight: "bold" },
+  stockBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 10,
+  },
+  stockBadgeText: { fontSize: 12, fontWeight: "600" },
   nutrientRow: { flexDirection: "row", gap: 8, marginBottom: 16, flexWrap: "wrap" },
   nutrientBadge: {
     backgroundColor: "#F9F0DC", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,

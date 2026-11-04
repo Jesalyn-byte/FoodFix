@@ -150,7 +150,7 @@ export interface AppSettings {
 
 // ==================== HELPERS ====================
 
-function toEpochSeconds(value: any): number {
+export function toEpochSeconds(value: any): number {
   if (!value) return 0;
   if (typeof value?.seconds === "number") return value.seconds;
   const ms = new Date(value).getTime();

@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db, getCurrentUser } from "../../lib/firebase";
 import { analyzeImageWithLamionAI, type NutritionInfo, type ScanResult } from "../../lib/lamion-ai";
+import { prepareImageForScan } from "../../lib/image-utils";
 
 export default function SubmitDishScreen() {
   const [step, setStep] = useState(1);
@@ -33,11 +34,16 @@ export default function SubmitDishScreen() {
         if (saved) {
           await AsyncStorage.removeItem("@foodfix_scan_result");
           const data = JSON.parse(saved);
-          if (data.base64) {
+          if (data.base64 || data.imageUri) {
             setScanImage(data.imageUri || "");
             setScanning(true);
             try {
-              const result = await analyzeImageWithLamionAI(data.base64, "dish");
+              let b64 = data.base64 || "";
+              if (data.imageUri) {
+                const opt = await prepareImageForScan(data.imageUri, b64 || undefined);
+                b64 = opt.base64;
+              }
+              const result = await analyzeImageWithLamionAI(b64, "dish");
               if (result.type === "dish" && result.dishName) {
                 setScanResult(result);
                 setDishName(result.dishName);
@@ -92,14 +98,19 @@ export default function SubmitDishScreen() {
   }
 
   async function analyzeImage(asset: ImagePicker.ImagePickerAsset) {
-    const base64 = asset.base64 || "";
-    if (!base64) { setScanError("Could not read image data."); return; }
     setScanImage(asset.uri);
     setScanError(null);
     setScanResult(null);
     setScanning(true);
     try {
-      const result = await analyzeImageWithLamionAI(base64, "dish");
+      const optimized = await prepareImageForScan(asset.uri, asset.base64 || undefined);
+      setScanImage(optimized.uri);
+      if (!optimized.base64) {
+        setScanError("Could not read image data.");
+        setScanning(false);
+        return;
+      }
+      const result = await analyzeImageWithLamionAI(optimized.base64, "dish");
       if (result.type === "dish" && result.dishName) {
         setScanResult(result);
         setDishName(result.dishName);

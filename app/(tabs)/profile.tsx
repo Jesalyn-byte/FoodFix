@@ -23,6 +23,7 @@ import {
 import { getOrdersByUser, onLocationUpdate, type LiveLocation, type Order } from "../../lib/firebase-store";
 import { usePwaInstall } from "../../lib/pwa-install";
 import { analyzeImageWithLamionAI } from "../../lib/lamion-ai";
+import { prepareImageForScan } from "../../lib/image-utils";
 
 export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -260,16 +261,17 @@ export default function ProfileScreen() {
   }
 
   async function processScanResult(asset: ImagePicker.ImagePickerAsset) {
-    const uri = asset.uri;
-    const base64 = asset.base64 || "";
-    setScanImage(uri);
-    setScanBase64(base64);
+    setScanImage(asset.uri);
     setScanResult(null);
     setScanModal(true);
     setScanning(true);
 
     try {
-      const analysis = await analyzeImageWithLamionAI(base64, "dish");
+      const optimized = await prepareImageForScan(asset.uri, asset.base64 || undefined);
+      setScanImage(optimized.uri);
+      setScanBase64(optimized.base64);
+
+      const analysis = await analyzeImageWithLamionAI(optimized.base64, "dish");
       let resultText = "";
       if (analysis.type === "dish") {
         resultText = `${analysis.dishName}\n\n`;
@@ -485,7 +487,7 @@ export default function ProfileScreen() {
         {/* Edit Modal */}
         <Modal visible={editVisible} animationType="slide" transparent onRequestClose={() => setEditVisible(false)}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={{ flex: 1 }}>
             <View style={styles.modalOverlay}>
               <View style={styles.modalCard}>
@@ -525,7 +527,7 @@ export default function ProfileScreen() {
 
         {/* AI Scan Modal - Redesigned */}
         <Modal visible={scanModal} animationType="slide" transparent onRequestClose={() => { setScanModal(false); setScanImage(null); setScanResult(null); }}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, justifyContent: "flex-end" }}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1, justifyContent: "flex-end" }}>
             <View style={styles.scanModalOuter}>
               <View style={styles.scanHandle} />
               <View style={styles.scanModalHeader}>
@@ -603,7 +605,7 @@ export default function ProfileScreen() {
 
         {/* AI Delivery Chat Modal */}
         <Modal visible={aiVisible} animationType="slide" transparent onRequestClose={handleCloseAi}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, justifyContent: "flex-end" }}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1, justifyContent: "flex-end" }}>
             <View style={styles.aiModal}>
               <View style={styles.aiHeader}>
                 <View style={styles.aiHeaderLeft}>

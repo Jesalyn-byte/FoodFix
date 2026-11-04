@@ -77,7 +77,7 @@ export default function SignUpScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled">
@@ -181,7 +181,7 @@ export default function SignUpScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9F0DC' },
-  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24, paddingBottom: 60 },
   card: {
     backgroundColor: '#fff', borderRadius: 24, padding: 28,
     elevation: 4,

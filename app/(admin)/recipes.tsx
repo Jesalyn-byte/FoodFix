@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AppLoader from "../../components/AppLoader";
 import OrderBreakdown from "../../components/OrderBreakdown";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
     Alert, FlatList, Image, Modal, Platform, RefreshControl,
@@ -11,21 +11,43 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { OrderStatus } from "../../constants/order";
 import { ORDER_STATUS_COLORS, ORDER_STATUS_LABELS, ORDER_STATUSES } from "../../constants/order";
 import { logOut } from "../../lib/firebase";
-import { getOrders, onAllOrdersUpdate, processRefund, updateOrderStatus, type Order } from "../../lib/firebase-store";
+import { getOrders, onAllOrdersUpdate, processRefund, toEpochSeconds, updateOrderStatus, type Order } from "../../lib/firebase-store";
 import { notifyDeliveryStarted } from "../../lib/notifications";
 import { createLogger } from "../../lib/logger";
 
 const log = createLogger("AdminOrders");
 
-const FILTER_OPTIONS: (OrderStatus | "all" | "archived")[] = ["all", ...ORDER_STATUSES, "archived"];
+export type AdminOrderFilter = OrderStatus | "all" | "today" | "archived";
+const FILTER_OPTIONS: AdminOrderFilter[] = ["all", "today", ...ORDER_STATUSES, "archived"];
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   pending: "accepted", accepted: "preparing", preparing: "out_for_delivery",
   issue_encountered: "out_for_delivery", out_for_delivery: "delivered",
 };
 
+function sortNewestFirst(rows: Order[]): Order[] {
+  return [...rows].sort((a, b) => {
+    const diff = toEpochSeconds(b.created_at) - toEpochSeconds(a.created_at);
+    if (diff !== 0) return diff;
+    return Number(b.order_number || 0) - Number(a.order_number || 0);
+  });
+}
+
+function isOrderToday(order: Order): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  const sec = toEpochSeconds(order.created_at);
+  if (!sec) return false;
+  const d = new Date(sec * 1000);
+  return d.toISOString().slice(0, 10) === today;
+}
+
 export default function AdminOrders() {
+  const params = useLocalSearchParams<{ filter?: string }>();
   const [orders, setOrders] = useState<Order[]>([]);
-  const [filter, setFilter] = useState<OrderStatus | "all" | "archived">("all");
+  const [filter, setFilter] = useState<AdminOrderFilter>(
+    params.filter && FILTER_OPTIONS.includes(params.filter as AdminOrderFilter)
+      ? (params.filter as AdminOrderFilter)
+      : "all"
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rejectId, setRejectId] = useState<string | null>(null);
@@ -38,14 +60,21 @@ export default function AdminOrders() {
   const [filterDropdown, setFilterDropdown] = useState(false);
   const [pendingRefundCount, setPendingRefundCount] = useState(0);
 
+  useEffect(() => {
+    if (params.filter && FILTER_OPTIONS.includes(params.filter as AdminOrderFilter)) {
+      setFilter(params.filter as AdminOrderFilter);
+    }
+  }, [params.filter]);
+
   const fetchOrders = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const data = await getOrders(filter === "all" || filter === "archived" ? undefined : { status: filter });
-      setOrders(data);
-      const pendingCount = data.filter((o: any) => o.refund_status === "pending").length;
+      const data = await getOrders(filter === "all" || filter === "archived" || filter === "today" ? undefined : { status: filter });
+      const sorted = sortNewestFirst(data);
+      setOrders(sorted);
+      const pendingCount = sorted.filter((o: any) => o.refund_status === "pending").length;
       setPendingRefundCount(pendingCount);
-      log.info("Orders fetched", { count: data.length, pendingRefundCount: pendingCount });
+      log.info("Orders fetched", { count: sorted.length, pendingRefundCount: pendingCount });
     } catch (e) { log.error("Failed to fetch orders", e); }
     if (!silent) setLoading(false);
   }, [filter]);
@@ -53,13 +82,13 @@ export default function AdminOrders() {
   useFocusEffect(useCallback(() => {
     fetchOrders();
     const unsub = onAllOrdersUpdate((allData) => {
-      const filtered = filter === "all" || filter === "archived" ? allData : allData.filter(o => o.status === filter);
-      setOrders(filtered);
-      setPendingRefundCount(allData.filter((o: any) => o.refund_status === "pending").length);
+      const sorted = sortNewestFirst(allData);
+      setOrders(sorted);
+      setPendingRefundCount(sorted.filter((o: any) => o.refund_status === "pending").length);
       setLoading(false);
     });
     return () => unsub?.();
-  }, [fetchOrders, filter]));
+  }, [fetchOrders]));
 
   async function onRefresh() {
     setRefreshing(true);
@@ -132,7 +161,14 @@ export default function AdminOrders() {
   const visible = filter === "archived"
     ? orders.filter((o) => archived.has(o.id))
     : orders.filter((o) => !archived.has(o.id));
-  const filtered = filter === "all" ? visible : filter === "archived" ? visible : visible.filter((o) => o.status === filter);
+  const filtered =
+    filter === "all"
+      ? visible
+      : filter === "archived"
+      ? visible
+      : filter === "today"
+      ? visible.filter(isOrderToday)
+      : visible.filter((o) => o.status === filter);
 
   function handleArchive(orderId: string) {
     Alert.alert("Archive Order", "Hide this order from the list?", [
@@ -173,7 +209,15 @@ export default function AdminOrders() {
       <TouchableOpacity style={styles.filterDropdownBtn} onPress={() => setFilterDropdown(true)}>
         <Ionicons name="filter" size={16} color="#F25C05" />
         <Text style={styles.filterDropdownText}>
-          {filter === "all" ? "All Orders" : filter === "archived" ? `Archived (${archived.size})` : filter === "out_for_delivery" ? "Delivering" : ORDER_STATUS_LABELS[filter]}
+          {filter === "all"
+            ? "All Orders"
+            : filter === "today"
+            ? "Today's Orders"
+            : filter === "archived"
+            ? `Archived (${archived.size})`
+            : filter === "out_for_delivery"
+            ? "Delivering"
+            : ORDER_STATUS_LABELS[filter]}
         </Text>
         <Ionicons name="chevron-down" size={16} color="#888" />
       </TouchableOpacity>
@@ -184,8 +228,24 @@ export default function AdminOrders() {
             <Text style={styles.dropdownTitle}>Filter Orders</Text>
             {FILTER_OPTIONS.map((f) => {
               const active = filter === f;
-              const color = f === "all" ? "#F25C05" : f === "archived" ? "#888" : ORDER_STATUS_COLORS[f];
-              const label = f === "all" ? "All Orders" : f === "archived" ? `Archived (${archived.size})` : f === "out_for_delivery" ? "Delivering" : ORDER_STATUS_LABELS[f];
+              const color =
+                f === "all"
+                  ? "#F25C05"
+                  : f === "today"
+                  ? "#27AE60"
+                  : f === "archived"
+                  ? "#888"
+                  : ORDER_STATUS_COLORS[f];
+              const label =
+                f === "all"
+                  ? "All Orders"
+                  : f === "today"
+                  ? "Today's Orders"
+                  : f === "archived"
+                  ? `Archived (${archived.size})`
+                  : f === "out_for_delivery"
+                  ? "Delivering"
+                  : ORDER_STATUS_LABELS[f];
               return (
                 <TouchableOpacity key={f}
                   style={[styles.dropdownItem, active && { backgroundColor: color + "15" }]}

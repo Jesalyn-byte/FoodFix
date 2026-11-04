@@ -23,7 +23,13 @@ export function clearScanCache(): void {
 }
 
 function getCacheKey(base64Image: string, scanMode: string): string {
-  return scanMode + ":" + base64Image.slice(0, 100);
+  const len = base64Image.length;
+  const s0 = base64Image.slice(0, 30);
+  const s1 = base64Image.slice(Math.floor(len * 0.25), Math.floor(len * 0.25) + 30);
+  const s2 = base64Image.slice(Math.floor(len * 0.5), Math.floor(len * 0.5) + 30);
+  const s3 = base64Image.slice(Math.floor(len * 0.75), Math.floor(len * 0.75) + 30);
+  const s4 = base64Image.slice(-30);
+  return `${scanMode}:${len}:${s0}:${s1}:${s2}:${s3}:${s4}`;
 }
 
 const LAMION_NIM_API_KEY =
@@ -40,7 +46,11 @@ const LAMION_VISION_BASE_URL = "https://generativelanguage.googleapis.com/v1beta
 const LAMION_VISION_MODEL = "gemini-2.0-flash";
 
 function getLamionVisionKey(): string {
-  return process.env.EXPO_PUBLIC_LAMION_VISION_API_KEY ?? "";
+  return (
+    process.env.EXPO_PUBLIC_LAMION_VISION_API_KEY ||
+    process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
+    ""
+  );
 }
 
 interface LamionVisionResponse {
@@ -148,23 +158,25 @@ const LAMION_ROUTER_MODEL_MAP: Record<string, string> = {
 };
 
 const LAMION_NIM_MODEL_MAP: Record<string, string> = {
-  "lamion-vision":               "meta/llama-3.2-11b-vision-instruct",
+  "lamion-vision":               "deepseek-ai/deepseek-v4.1-flash",
   "lamion-vision-large":         "meta/llama-3.2-90b-vision-instruct",
-  "meta/llama-3.2-11b-vision-instruct": "meta/llama-3.2-11b-vision-instruct",
+  "lamion-vision-max":           "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "lamion-vision-max-latest":    "deepseek-ai/deepseek-v4.1-flash",
+  "meta/llama-3.2-11b-vision-instruct": "deepseek-ai/deepseek-v4.1-flash",
   "meta/llama-3.2-90b-vision-instruct": "meta/llama-3.2-90b-vision-instruct",
-  "lamion-default":              "meta/llama-3.2-11b-vision-instruct",
+  "deepseek-ai/deepseek-v4.1-flash":    "deepseek-ai/deepseek-v4.1-flash",
+  "nvidia/nemotron-3.5-super-vl-120b-a12b": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "lamion-default":              "deepseek-ai/deepseek-v4.1-flash",
   "lamion-large":                "meta/llama-3.2-90b-vision-instruct",
-  "lamion-chat":                  "meta/llama-3.2-11b-vision-instruct",
-  "lamion-chat-latest":           "meta/llama-3.2-11b-vision-instruct",
-  "lamion-chat-plus":                   "meta/llama-3.2-11b-vision-instruct",
-  "lamion-chat-max":                    "meta/llama-3.2-90b-vision-instruct",
-  "lamion-vision-max":                 "meta/llama-3.2-11b-vision-instruct",
-  "lamion-vision-max-latest":          "meta/llama-3.2-11b-vision-instruct",
-  "lamion-chat-free":           "meta/llama-3.2-11b-vision-instruct",
-  "lamion-vl-flash":              "meta/llama-3.2-11b-vision-instruct",
-  "lamion-vl-plus":               "meta/llama-3.2-11b-vision-instruct",
-  "lamion-vl-plus-latest":         "meta/llama-3.2-11b-vision-instruct",
-  "lamion-nemotron-vl-free":     "meta/llama-3.2-11b-vision-instruct",
+  "lamion-chat":                 "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-chat-latest":          "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-chat-plus":            "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-chat-max":             "meta/llama-3.2-90b-vision-instruct",
+  "lamion-chat-free":            "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-vl-flash":             "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-vl-plus":              "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-vl-plus-latest":        "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-nemotron-vl-free":     "nvidia/nemotron-3.5-super-vl-120b-a12b",
 };
 
 /**
@@ -308,14 +320,25 @@ export interface SuggestedRecipe {
  * Exported for unit testing.
  */
 export function extractJSON(text: string): string | null {
+  if (!text || typeof text !== "string") return null;
+
+  let raw = text.trim();
+  // Strip reasoning blocks if present (<think>...</think>)
+  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
   // 1. Try to strip markdown code fence
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) return fenceMatch[1].trim();
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) raw = fenceMatch[1].trim();
 
   // 2. Find the outermost {...} block
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start !== -1 && end > start) return text.slice(start, end + 1);
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    let candidate = raw.slice(start, end + 1);
+    // Sanitize trailing commas before closing braces/brackets (common LLM JSON flaw)
+    candidate = candidate.replace(/,\s*([}\]])/g, "$1");
+    return candidate;
+  }
 
   return null;
 }
@@ -354,7 +377,13 @@ async function callProvider(
     const response = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model: resolvedModel, messages, max_tokens: maxTokens }),
+      body: JSON.stringify({
+        model: resolvedModel,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.15,
+        top_p: 0.9,
+      }),
       signal: controller.signal,
     });
 
@@ -389,7 +418,16 @@ async function callProvider(
     if (data.error) {
       throw new Error(data.error.message || "Unknown AI error");
     }
-    return data.choices[0]?.message?.content || "";
+    const choice = data.choices?.[0]?.message as any;
+    if (choice) {
+      if (typeof choice.content === "string" && choice.content.trim()) {
+        return choice.content;
+      }
+      if (typeof choice.reasoning_content === "string" && choice.reasoning_content.trim()) {
+        return choice.reasoning_content;
+      }
+    }
+    return "";
   } catch (error: any) {
     if (error.name === "AbortError") {
       throw new Error("Request timed out. Check your internet connection and try again.");
@@ -459,7 +497,23 @@ async function callLamionAPI(
 // ──────────────────────────────────────────────
 
 export const LAMION_VISION_PROMPT_DISH = `You are "Lamion AI" — a custom-trained culinary Artificial Intelligence developed exclusively by the research team for FoodFix. You are an expert Filipino cuisine identifier, recipe expert, and nutritionist.
-Analyze the food image provided and identify the authentic Filipino dish. Respond ONLY with valid JSON (no markdown, no code fences):
+Analyze the food image provided and accurately identify the Filipino dish. Use visual culinary cues:
+- Sour broth with kangkong, radish, tomatoes = Sinigang (Baboy, Bangus, Hipon, Baka)
+- Braised meat with dark soy sauce, vinegar, bay leaves, peppercorns = Adobo (Manok, Baboy)
+- Orange/yellow thick peanut sauce with eggplant, string beans, pechay, bagoong = Kare-Kare
+- Sizzling chopped pork with onions, chili, calamansi = Sisig
+- Rich red tomato stew with liver spread, bell peppers, carrots, potatoes = Caldereta or Menudo
+- Clear beef bone broth with bone marrow, corn, pechay = Bulalo
+- Clear ginger broth with chicken, green papaya/sayote, sili leaves = Tinola
+- Grilled chicken with golden annatto-oil char = Chicken Inasal
+- Deep-fried crispy pork belly with blistered skin = Lechon Kawali or Crispy Pata
+- Thick egg noodle soup with liver, egg, chicharon = Lomi or Batchoy
+- Stir-fried noodles with vegetables, meat, calamansi = Pancit (Canton, Bihon, Palabok)
+- Golden rice porridge with ginger, fried garlic, egg = Arroz Caldo / Lugaw
+- Deep-fried egg rolls = Lumpiang Shanghai
+- Other classics: Bicol Express, Dinuguan, Pinakbet, Laing, Tapsilog, Halo-Halo.
+
+Respond ONLY with valid JSON (strictly no markdown, no code fences, no introductory or trailing text):
 {
   "type": "dish",
   "dishName": "name of the dish",
@@ -482,7 +536,7 @@ Analyze the food image provided and identify the authentic Filipino dish. Respon
 If the food is not Filipino, set "isFilipino": false and still identify the dish with full nutrition info. NEVER mention any third-party AI companies or external model names.`;
 
 export const LAMION_VISION_PROMPT_INGREDIENTS = `You are "Lamion AI" — a custom-trained culinary Artificial Intelligence developed exclusively by the research team for FoodFix. You are an expert ingredient identifier for Filipino cooking and nutrition.
-Analyze the image to identify all visible food ingredients, then suggest Filipino dishes that can be prepared with those ingredients. Respond ONLY with valid JSON (no markdown, no code fences):
+Analyze the image to identify all visible food ingredients, then suggest authentic Filipino dishes that can realistically be prepared with those ingredients (e.g. Sinigang, Adobo, Tinola, Menudo, Pinakbet, Pancit, Arroz Caldo). Respond ONLY with valid JSON (strictly no markdown, no code fences, no introductory or trailing text):
 {
   "type": "ingredients",
   "ingredients": ["ingredient1", "ingredient2"],
@@ -577,58 +631,62 @@ export async function analyzeImageWithLamionAI(
       ? "Identify this dish and provide its nutrition facts. Respond with JSON only."
       : "Identify the ingredients and suggest Filipino recipes with nutrition info. Respond with JSON only.";
 
+  const cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
+
+  if (!cleanBase64.trim()) {
+    return { type: "unknown", description: "No image data provided for scanning." };
+  }
+
   let content = "";
-
-  // 1) Cascade through Lamion vision model tiers
-  const messages: LamionMessage[] = [
-    { role: "system", content: systemPrompt },
-    {
-      role: "user",
-      content: [
-        {
-          type: "image_url",
-          image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-        },
-        { type: "text", text: userText },
-      ],
-    },
-  ];
-
-  const visionModels = [
-    "lamion-vision",
-    "meta/llama-3.2-11b-vision-instruct",
-    "lamion-vision-large",
-    "meta/llama-3.2-90b-vision-instruct",
-    "lamion-chat-free",
-    "lamion-vision-max-latest",
-  ];
-
   const scanStartedAt = Date.now();
   let usedModel = "none";
 
-  for (const model of visionModels) {
-    try {
-      log.debug(`Trying Lamion AI vision model: ${model}`);
-      content = await callLamionAPI(model, messages, 1500, "vision", 15000);
-      usedModel = model;
-      log.info(`Lamion AI vision succeeded with: ${model}`);
-      break;
-    } catch (err: any) {
-      log.warn(`Vision model ${model} failed: ${err.message} — trying next fallback.`);
-      continue;
-    }
-  }
-
-  // 2) Fallback to the Lamion flagship vision backend if available
-  if (!content && getLamionVisionKey()) {
+  // 1) Primary Tier: Gemini 2.0 Flash multimodal vision (highest accuracy & lowest latency for Filipino dishes)
+  if (getLamionVisionKey()) {
     try {
       log.debug("Trying Lamion flagship vision backend...");
-      content = await callLamionVision(systemPrompt, userText, base64Image, 1500, 15000);
+      content = await callLamionVision(systemPrompt, userText, cleanBase64, 1500, 15000);
       usedModel = "lamion-vision-pro";
       log.info("Lamion flagship vision succeeded.");
     } catch (err: any) {
-      log.warn(`Lamion flagship vision backend failed: ${err.message}`);
+      log.warn(`Lamion flagship vision backend failed: ${err.message} — trying fallback models.`);
       content = "";
+    }
+  }
+
+  // 2) Fallback: Cascade through Lamion vision model tiers
+  if (!content) {
+    const messages: LamionMessage[] = [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: userText },
+          {
+            type: "image_url",
+            image_url: { url: `data:image/jpeg;base64,${cleanBase64}` },
+          },
+        ],
+      },
+    ];
+
+    const visionModels = [
+      "lamion-vision",
+      "lamion-vision-large",
+      "lamion-vision-max-latest",
+    ];
+
+    for (const model of visionModels) {
+      try {
+        log.debug(`Trying Lamion AI vision model: ${model}`);
+        content = await callLamionAPI(model, messages, 1200, "vision", 12000);
+        usedModel = model;
+        log.info(`Lamion AI vision succeeded with: ${model}`);
+        break;
+      } catch (err: any) {
+        log.warn(`Vision model ${model} failed: ${err.message} — trying next fallback.`);
+        continue;
+      }
     }
   }
 

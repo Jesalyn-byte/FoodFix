@@ -139,13 +139,19 @@ export default function AdminDashboard() {
             {/* Stats */}
             <View style={styles.statsRow}>
               {[
-                { label: "Total Orders", value: stats.totalOrders, color: "#F25C05", icon: "receipt", route: "/(admin)/recipes" },
-                { label: "Pending", value: stats.pendingOrders, color: "#F39C12", icon: "time", route: "/(admin)/recipes" },
-                { label: "Today", value: stats.todayOrders, color: "#27AE60", icon: "today", route: "/(admin)/recipes" },
+                { label: "Total Orders", value: stats.totalOrders, color: "#F25C05", icon: "receipt", route: "/(admin)/recipes", filter: "all" },
+                { label: "Pending", value: stats.pendingOrders, color: "#F39C12", icon: "time", route: "/(admin)/recipes", filter: "pending" },
+                { label: "Today", value: stats.todayOrders, color: "#27AE60", icon: "today", route: "/(admin)/recipes", filter: "today" },
                 { label: "Menu Items", value: stats.menuItems, color: "#9B59B6", icon: "restaurant", route: "/(admin)/categories" },
               ].map((s) => (
                 <TouchableOpacity key={s.label} style={styles.statCard} activeOpacity={0.7}
-                  onPress={() => router.push(s.route as any)}>
+                  onPress={() => {
+                    if (s.filter) {
+                      router.push({ pathname: "/(admin)/recipes", params: { filter: s.filter } } as any);
+                    } else {
+                      router.push(s.route as any);
+                    }
+                  }}>
                   <View style={[styles.statIcon, { backgroundColor: s.color + "22" }]}>
                     <Ionicons name={s.icon as any} size={20} color={s.color} />
                   </View>

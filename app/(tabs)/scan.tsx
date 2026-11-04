@@ -20,7 +20,7 @@ import { toast } from "../../components/Toast";
 import { getCurrentUser, getProfile } from "../../lib/firebase";
 import { friendlyFirestoreError } from "../../lib/firebase-helpers";
 import { createLogger } from "../../lib/logger";
-import { createOrder, deleteSavedAddress, getSavedAddresses, getSettings, notifyGcashPayment, rollbackStock, saveAddress, validateStock, type AppSettings, type SavedAddress } from "../../lib/firebase-store";
+import { createOrder, deleteSavedAddress, getMenuItems, getSavedAddresses, getSettings, notifyGcashPayment, rollbackStock, saveAddress, validateStock, type AppSettings, type SavedAddress } from "../../lib/firebase-store";
 
 const log = createLogger("Cart");
 
@@ -119,7 +119,34 @@ export default function CartScreen() {
     setLoading(true);
     try {
       const raw = await AsyncStorage.getItem(CART_KEY);
-      const items = raw ? JSON.parse(raw) : [];
+      let items: CartItem[] = raw ? JSON.parse(raw) : [];
+      if (items.length > 0) {
+        try {
+          const menu = await getMenuItems();
+          let priceChanged = false;
+          items = items.map((cartItem) => {
+            const fresh = menu.find((m) => m.id === cartItem.menu_item_id);
+            if (fresh) {
+              if (fresh.price !== cartItem.price) {
+                priceChanged = true;
+              }
+              return {
+                ...cartItem,
+                price: fresh.price,
+                stock_quantity: fresh.stock_quantity,
+                name: fresh.name,
+              };
+            }
+            return cartItem;
+          });
+          if (priceChanged) {
+            await AsyncStorage.setItem(CART_KEY, JSON.stringify(items));
+            toast.info("Cart prices updated to match latest menu.");
+          }
+        } catch (syncErr) {
+          log.warn("Failed to sync live menu prices for cart", syncErr);
+        }
+      }
       setCart(items);
       log.info("Cart loaded", { itemCount: items.length });
     } catch (e) { log.error("Failed to load cart", e); }
@@ -442,6 +469,34 @@ export default function CartScreen() {
 
     log.info("Checkout started", { itemCount: cart.length, orderType, paymentMethod, total });
     setPlacing(true);
+
+    // Re-verify latest prices from the live menu to prevent stale price checkouts
+    try {
+      const menu = await getMenuItems();
+      let priceChanged = false;
+      let changedDesc = "";
+      const updatedCart = cart.map((cartItem) => {
+        const fresh = menu.find((m) => m.id === cartItem.menu_item_id);
+        if (fresh && fresh.price !== cartItem.price) {
+          priceChanged = true;
+          changedDesc += `• ${cartItem.name}: P${cartItem.price.toFixed(2)} → P${fresh.price.toFixed(2)}\n`;
+          return { ...cartItem, price: fresh.price, stock_quantity: fresh.stock_quantity };
+        }
+        return cartItem;
+      });
+      if (priceChanged) {
+        await saveCart(updatedCart);
+        setPlacing(false);
+        Alert.alert(
+          "Price Updated",
+          `The price of item(s) in your cart has changed:\n\n${changedDesc}\nYour cart has been updated with the latest price. Please review and checkout again.`
+        );
+        return;
+      }
+    } catch (e) {
+      log.warn("Live menu price check warning:", e);
+    }
+
     try {
       const stockCheck = await validateStock(cart.map((c) => ({
         menu_item_id: c.menu_item_id,
@@ -554,7 +609,10 @@ export default function CartScreen() {
                 )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemPrice}>P{item.price.toFixed(2)}</Text>
+                  <Text style={styles.itemPrice}>P{(item.price * item.quantity).toFixed(2)}</Text>
+                  {item.quantity > 1 && (
+                    <Text style={styles.itemUnitPrice}>P{item.price.toFixed(2)} each</Text>
+                  )}
                 </View>
                 <View style={styles.qtyRow}>
                   <TouchableOpacity style={styles.qtyBtn} onPress={() => updateQty(idx, -1)}>
@@ -567,9 +625,6 @@ export default function CartScreen() {
                   <Text style={styles.qtyText}>{item.quantity}</Text>
                   <TouchableOpacity style={[styles.qtyBtn, item.quantity >= (item.stock_quantity || 999) && { opacity: 0.4 }]} onPress={() => updateQty(idx, 1)}>
                     <Ionicons name="add" size={16} color="#F25C05" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => removeItem(idx)} style={{ marginLeft: 8 }}>
-                    <Ionicons name="trash-outline" size={18} color="#E74C3C" />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1007,6 +1062,7 @@ const styles = StyleSheet.create({
   },
   itemName: { fontSize: 14, fontWeight: "bold", color: "#2E1A06" },
   itemPrice: { fontSize: 13, color: "#F25C05", marginTop: 2 },
+  itemUnitPrice: { fontSize: 11, color: "#888", marginTop: 1 },
   qtyRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   qtyBtn: {
     width: 30, height: 30, borderRadius: 15, backgroundColor: "#FFF5EE",

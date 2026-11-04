@@ -81,6 +81,17 @@ jest.mock("expo-notifications", () => ({
   },
 }));
 
+// ── expo-image-manipulator mock ───────────────────────────
+jest.mock("expo-image-manipulator", () => ({
+  manipulateAsync: jest.fn().mockResolvedValue({
+    uri: "file://mock-optimized.jpg",
+    base64: "mockbase64",
+    width: 800,
+    height: 600,
+  }),
+  SaveFormat: { JPEG: "jpeg", PNG: "png", WEBP: "webp" },
+}));
+
 // ── Firebase mocks ────────────────────────────────────────
 jest.mock("firebase/app", () => ({
   initializeApp: jest.fn().mockReturnValue({ name: "test-app" }),
