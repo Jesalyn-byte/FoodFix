@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-# ================================================================
-#  LasangPinoy Mobile - Client Demo Bootstrap (macOS / Linux)
-# ================================================================
-# Usage:
-#   1. Place this script and .env.demo in the SAME folder.
-#   2. Open Terminal, cd into that folder.
-#   3. Run:  bash run-demo.sh
-#      (or:  chmod +x run-demo.sh && ./run-demo.sh)
-# ================================================================
+# ======================================================================
+#  FoodFix (LasangPinoy) - Automated Setup & Technical Demo Launcher
+# ======================================================================
 
 set -u
 
-# --- Colors (fallback to plain if not a TTY) ---
 if [ -t 1 ]; then
     BOLD=$'\033[1m'; RED=$'\033[31m'; GREEN=$'\033[32m'
     YELLOW=$'\033[33m'; CYAN=$'\033[36m'; RESET=$'\033[0m'
@@ -21,105 +14,142 @@ fi
 
 err()  { printf "%s[ERROR]%s %s\n" "$RED" "$RESET" "$*" >&2; }
 ok()   { printf "        %sOK%s  %s\n" "$GREEN" "$RESET" "$*"; }
-step() { printf "\n%s[%s/6]%s %s\n" "$BOLD$CYAN" "$1" "$RESET" "$2"; }
+step() { printf "\n%s[%s/5]%s %s\n" "$BOLD$CYAN" "$1" "$RESET" "$2"; }
 
 REPO_URL="https://github.com/Jesalyn-byte/FoodFix.git"
-REPO_DIR="FoodFix"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+START_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$START_DIR"
 
-printf "%s================================================================%s\n" "$BOLD" "$RESET"
-printf "%s  LasangPinoy Mobile - Client Demo Bootstrap%s\n" "$BOLD" "$RESET"
-printf "%s================================================================%s\n" "$BOLD" "$RESET"
-cat <<'EOF'
-
-This script will:
-  1. Verify Node.js and Git are installed
-  2. Download the project from GitHub
-  3. Copy your .env.demo into the project as .env
-  4. Install dependencies (5-15 minutes)
-  5. Launch the app in your web browser
-
-EOF
-read -r -p "Press Enter to begin, or Ctrl+C to cancel..." _
+printf "%s======================================================================%s\n" "$BOLD" "$RESET"
+printf "%s  FOODFIX (LasangPinoy) - Automated Setup & Technical Demo Launcher%s\n" "$BOLD" "$RESET"
+printf "%s======================================================================%s\n" "$BOLD" "$RESET"
 
 # ---------- Step 1: Node.js ----------
 step 1 "Checking for Node.js..."
 if ! command -v node >/dev/null 2>&1; then
     err "Node.js is not installed or not on PATH."
-    printf "\nInstall the LTS version from:\n    %shttps://nodejs.org/en/download%s\n" "$CYAN" "$RESET"
-    printf "After installing, reopen Terminal and run this script again.\n\n"
+    printf "Install LTS from: https://nodejs.org/en/download\n"
     exit 1
 fi
 ok "Node.js $(node --version)"
 
 # ---------- Step 2: Git ----------
 step 2 "Checking for Git..."
-if ! command -v git >/dev/null 2>&1; then
-    err "Git is not installed or not on PATH."
-    printf "\nmacOS: run  %sxcode-select --install%s  in Terminal.\n" "$CYAN" "$RESET"
-    printf "Linux: use your distro's package manager (e.g. apt install git).\n\n"
-    exit 1
-fi
-ok "$(git --version)"
-
-# ---------- Step 3: Clone or pull ----------
-if [ -f "$REPO_DIR/package.json" ]; then
-    step 3 "Project folder already exists. Updating..."
-    if ( cd "$REPO_DIR" && git pull --ff-only ); then
-        ok "Repo up to date"
-    else
-        printf "        %s[WARN]%s Could not fast-forward. Continuing with existing copy.\n" "$YELLOW" "$RESET"
-    fi
+if command -v git >/dev/null 2>&1; then
+    ok "$(git --version)"
 else
-    step 3 "Cloning project from GitHub..."
-    if ! git clone "$REPO_URL" "$REPO_DIR"; then
-        err "git clone failed. Check your internet connection and confirm the URL is reachable:"
-        printf "    %s\n\n" "$REPO_URL"
+    printf "        %s[WARN]%s Git not found; will check for local folder or ZIP.\n" "$YELLOW" "$RESET"
+fi
+
+# ---------- Step 3: Unpack ZIP / Clone / Resolve Path ----------
+step 3 "Resolving project files and directory path..."
+PROJECT_DIR=""
+
+if [ -f "$START_DIR/package.json" ]; then
+    PROJECT_DIR="$START_DIR"
+else
+    for d in "FoodFix" "FoodFix-main" "FoodFix-main/FoodFix-main" "PUPLasangpinoy" "PUPLasangpinoy-main"; do
+        if [ -f "$START_DIR/$d/package.json" ]; then
+            PROJECT_DIR="$START_DIR/$d"
+            break
+        fi
+    done
+fi
+
+if [ -z "$PROJECT_DIR" ]; then
+    FOUND_ZIP="$(ls -1 "$START_DIR"/FoodFix*.zip "$START_DIR"/PUPLasangpinoy*.zip "$HOME/Downloads"/FoodFix*.zip 2>/dev/null | head -n 1 || true)"
+    if [ -n "$FOUND_ZIP" ] && command -v unzip >/dev/null 2>&1; then
+        printf "        Unpacking %s...\n" "$FOUND_ZIP"
+        mkdir -p "$START_DIR/FoodFix_Unpacked"
+        unzip -q -o "$FOUND_ZIP" -d "$START_DIR/FoodFix_Unpacked"
+        FOUND_PKG="$(find "$START_DIR/FoodFix_Unpacked" -name "package.json" -maxdepth 3 | head -n 1 || true)"
+        if [ -n "$FOUND_PKG" ]; then
+            PROJECT_DIR="$(dirname "$FOUND_PKG")"
+        fi
+    fi
+fi
+
+if [ -z "$PROJECT_DIR" ]; then
+    if ! command -v git >/dev/null 2>&1; then
+        err "Neither an existing project folder/ZIP nor Git was found."
         exit 1
     fi
-    ok "Cloned into $REPO_DIR"
+    printf "        Cloning repository from %s...\n" "$REPO_URL"
+    git clone "$REPO_URL" "$START_DIR/FoodFix" || exit 1
+    PROJECT_DIR="$START_DIR/FoodFix"
 fi
 
-# ---------- Step 4: .env file ----------
-step 4 "Setting up .env file..."
-if [ -f ".env.demo" ]; then
-    cp ".env.demo" "$REPO_DIR/.env"
-    ok ".env.demo copied into project as .env"
-elif [ -f "$REPO_DIR/.env" ]; then
-    ok "Existing .env already in project folder, keeping it"
+cd "$PROJECT_DIR"
+ok "Directed to Project Path: $(pwd)"
+
+# ---------- Step 4: Configure .env ----------
+step 4 "Configuring .env environment variables..."
+ENV_SOURCE=""
+if [ -f "$PROJECT_DIR/.env" ]; then
+    ENV_SOURCE="$PROJECT_DIR/.env"
 else
-    err "No .env.demo found next to this script, and no existing .env inside the project folder."
-    printf "\nPlease place the .env.demo file given by the developer in the\n"
-    printf "same folder as this script, then run it again.\n\n"
-    printf "Current script folder:\n    %s\n\n" "$SCRIPT_DIR"
-    exit 1
+    for f in \
+        "$START_DIR/.env.demo" \
+        "$START_DIR/.env.demo.txt" \
+        "$START_DIR/.env" \
+        "$START_DIR/env.demo" \
+        "$HOME/Desktop/.env.demo" \
+        "$HOME/Downloads/.env.demo"; do
+        if [ -f "$f" ]; then
+            ENV_SOURCE="$f"
+            break
+        fi
+    done
 fi
 
-# ---------- Step 5: npm install ----------
-cd "$SCRIPT_DIR/$REPO_DIR"
-step 5 "Installing dependencies..."
-printf "        This step can take 5 to 15 minutes. Please be patient.\n"
-printf "        You can safely ignore yellow 'npm warn' messages.\n\n"
-if ! npm install; then
-    err "npm install failed. Scroll up to see the red error lines."
-    printf "        If the error mentions network/ETIMEDOUT, check your internet and re-run.\n\n"
-    exit 1
+if [ -n "$ENV_SOURCE" ]; then
+    if [ "$ENV_SOURCE" != "$PROJECT_DIR/.env" ]; then
+        cp "$ENV_SOURCE" "$PROJECT_DIR/.env"
+        ok "Copied $ENV_SOURCE -> $PROJECT_DIR/.env"
+    else
+        ok "Active .env verified at $PROJECT_DIR/.env"
+    fi
+elif [ -f "$PROJECT_DIR/.env.example" ]; then
+    cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
+    printf "        %s[WARN]%s Created .env from .env.example. Please populate API keys in %s/.env\n" "$YELLOW" "$RESET" "$PROJECT_DIR"
 fi
-ok "Dependencies installed"
 
-# ---------- Step 6: Launch Expo Web ----------
-step 6 "Starting Expo web server..."
-cat <<EOF
+# ---------- Step 5: Install Dependencies ----------
+step 5 "Checking project dependencies..."
+if [ -f "$PROJECT_DIR/node_modules/expo/package.json" ]; then
+    ok "node_modules already installed"
+else
+    printf "        Installing npm packages (5-15 minutes)...\n"
+    if ! npm install; then
+        npm install --legacy-peer-deps || exit 1
+    fi
+    ok "Dependencies installed"
+fi
 
-================================================================
-  The app will open in your default web browser in a moment.
+# ---------- Step 6: Interactive Menu ----------
+while true; do
+    cat <<EOF
 
-  If it does not open automatically, visit:
-      http://localhost:8081
-
-  To STOP the server: come back to this Terminal and press Ctrl+C.
-================================================================
-
+======================================================================
+  FOODFIX READY - TECHNICAL DEMO & DEBUGGING MENU
+  Active Path: $(pwd)
+======================================================================
+  [1] Start Local Expo Server (Web + Mobile QR Code for Android/iOS)
+  [2] Start Local Web Server Only (Opens http://localhost:8081)
+  [3] Launch Lamion AI Live Technical Debugger (Terminal Chat & Guardrails)
+  [4] Run Automated Test Suite (117 Unit Tests: Lamion AI + Guardrails + DB)
+  [5] Run TypeScript Compiler Verification (npx tsc --noEmit)
+  [0] Exit
+======================================================================
 EOF
-exec npx expo start --web
+    read -r -p "Select an option [1-5, or 0 to exit] (default=1): " CHOICE
+    CHOICE="${CHOICE:-1}"
+    case "$CHOICE" in
+        1) npx expo start -c ;;
+        2) npx expo start --web -c ;;
+        3) node scripts/debug-lamion-demo.js ;;
+        4) npm test ;;
+        5) npx tsc --noEmit && ok "0 TypeScript errors!" ;;
+        0) exit 0 ;;
+    esac
+done
