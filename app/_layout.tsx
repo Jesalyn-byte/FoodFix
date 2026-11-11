@@ -5,6 +5,7 @@ import { Component, ErrorInfo, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import '../lib/alert-web'; // Polyfill Alert.alert for Web
 import ToastHost from '../components/Toast';
+import WebDefenseFrame from '../components/WebDefenseFrame';
 import { onAuthChange, updateProfile } from '../lib/firebase';
 import { createLogger } from '../lib/logger';
 import '../lib/location-task'; // Register background location task definition
@@ -119,18 +120,20 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <View style={styles.container}>
-        <StatusBar style="light" />
-        {showWebWarning && (
-          <View style={styles.warningBanner}>
-            <Text style={styles.warningText}>
-              Ad blocker detected. Some features may not work. Consider testing on mobile.
-            </Text>
-          </View>
-        )}
-        <Slot />
-        <ToastHost />
-      </View>
+      <WebDefenseFrame>
+        <View style={styles.container}>
+          <StatusBar style="light" />
+          {showWebWarning && (
+            <View style={styles.warningBanner}>
+              <Text style={styles.warningText}>
+                Ad blocker detected. Some features may not work. Consider testing on mobile.
+              </Text>
+            </View>
+          )}
+          <Slot />
+          <ToastHost />
+        </View>
+      </WebDefenseFrame>
     </ErrorBoundary>
   );
 }
