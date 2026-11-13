@@ -63,7 +63,7 @@ export default function AdminMessages() {
       await sendMessage({
         conversation_id: selectedId,
         sender_id: user?.uid || "admin",
-        sender_name: "FoodFix Support",
+        sender_name: "FoodFix Store",
         sender_role: "admin",
         content: reply.trim(),
       });
@@ -87,8 +87,14 @@ export default function AdminMessages() {
       }}
     >
       {/* Left Conversation Thread List */}
-      <div style={{ borderRight: "1px solid #F0E4CE", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: 14, borderBottom: "1px solid #F0E4CE", display: "flex", gap: 6 }}>
+      <div style={{ borderRight: "1px solid var(--ff-border)", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "12px 14px 6px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <strong style={{ fontSize: 13.5, color: "var(--ff-espresso)" }}>Customer Inquiries</strong>
+          <span className="ff-live-pill" style={{ padding: "2px 8px", fontSize: 10.5 }}>
+            <span className="ff-live-dot" /> Live Chat
+          </span>
+        </div>
+        <div style={{ padding: 14, borderBottom: "1px solid var(--ff-border)", display: "flex", gap: 6 }}>
           <button
             type="button"
             className="ff-btn"
@@ -283,8 +289,8 @@ export default function AdminMessages() {
 
       <ConfirmModal
         open={!!confirmDelete}
-        title="Delete Support Conversation?"
-        description={`Permanently delete all support chat messages with ${confirmDelete?.name || "this customer"}?`}
+        title="Delete Customer Inquiry?"
+        description={`Permanently delete all live chat messages with ${confirmDelete?.name || "this customer"}?`}
         confirmLabel="Delete Thread"
         onCancel={() => setConfirmDelete(null)}
         onConfirm={async () => {

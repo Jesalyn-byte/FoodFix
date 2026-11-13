@@ -38,7 +38,7 @@ const ADMIN_TABS = [
   { key: "overview", label: "Dashboard", icon: LayoutDashboard },
   { key: "orders", label: "Orders", icon: Receipt },
   { key: "menu", label: "Menu & Stock", icon: Utensils },
-  { key: "messages", label: "Support Messages", icon: MessageSquare },
+  { key: "messages", label: "Customer Inquiries", icon: MessageSquare },
   { key: "banners", label: "Banners", icon: Images },
   { key: "reviews", label: "Customer Reviews", icon: Star },
   { key: "nutrition", label: "Lamion AI & Nutrition", icon: BookOpen },

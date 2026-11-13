@@ -10,7 +10,6 @@ import OrderBreakdown from "../../components/OrderBreakdown";
 import {
   FloatingUtilities,
   GlobalSearchModal,
-  PrintButton,
   SvgLoader,
   ThemeToggleButton,
   withUtm,
@@ -184,7 +183,6 @@ export default function StaffDashboard({
             >
               <Search size={14} /> Search
             </button>
-            <PrintButton />
             <ThemeToggleButton dark={dark} onToggle={onToggleDark} />
             <span className="ff-live-pill ff-no-print">
               <span className="ff-live-dot" /> Live Order Sync
@@ -249,7 +247,17 @@ export default function StaffDashboard({
 
                         <OrderBreakdown showItems items={o.items} subtotal={o.subtotal} deliveryFee={o.delivery_fee} total={o.total} />
 
-                        <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
+                        <div style={{ display: "flex", gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
+                          {(o.order_type === "delivery_now" || o.order_type === "delivery_later") &&
+                            ["accepted", "preparing", "out_for_delivery"].includes(o.status) && (
+                              <button
+                                type="button"
+                                className="ff-btn ff-btn-outline"
+                                onClick={() => setTrackOrder(o)}
+                              >
+                                <MapPin size={15} /> Live Map
+                              </button>
+                            )}
                           {o.status === "accepted" && (
                             <button
                               type="button"
@@ -281,27 +289,17 @@ export default function StaffDashboard({
                             </button>
                           )}
                           {o.status === "out_for_delivery" && (
-                            <>
-                              <button
-                                type="button"
-                                className="ff-btn ff-btn-blue"
-                                style={{ flex: 1 }}
-                                onClick={() => setTrackOrder(o)}
-                              >
-                                <MapPin size={15} /> Live Map
-                              </button>
-                              <button
-                                type="button"
-                                className="ff-btn ff-btn-green"
-                                style={{ flex: 1 }}
-                                onClick={async () => {
-                                  await updateOrderStatus(o.id, "delivered");
-                                  toast.success(`Order #${o.order_number} marked delivered!`);
-                                }}
-                              >
-                                <CheckCircle2 size={15} /> Mark Delivered
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              className="ff-btn ff-btn-green"
+                              style={{ flex: 1 }}
+                              onClick={async () => {
+                                await updateOrderStatus(o.id, "delivered");
+                                toast.success(`Order #${o.order_number} marked delivered!`);
+                              }}
+                            >
+                              <CheckCircle2 size={15} /> Mark Delivered
+                            </button>
                           )}
                         </div>
                       </div>

@@ -218,7 +218,7 @@ export function buildDeliveryMapHtml(opts: DeliveryMapInitOptions): string {
 <div class="map-actions">
   <button type="button" class="map-btn" id="btnFit" title="Fit entire route">Fit Route</button>
   <button type="button" class="map-btn" id="btnFollow" title="Follow live rider">Follow Driver</button>
-  <button type="button" class="map-btn" id="btnLayer" title="Toggle map style">Street Map</button>
+  <button type="button" class="map-btn" id="btnLayer" title="Toggle map style">Clean Map</button>
 </div>
 
 <div class="route-hud" id="routeHud">
@@ -233,7 +233,7 @@ export function buildDeliveryMapHtml(opts: DeliveryMapInitOptions): string {
     driver: ${hasDriver ? `{ lat: ${dLat}, lng: ${dLng}, speed: null, label: ${escapeJs(driverPopup)} }` : "null"},
     followDriver: false,
     userInteracted: false,
-    useOsmStandard: false,
+    useAltLayer: false,
     lastRouteKey: "",
     lastRouteAt: 0
   };
@@ -245,17 +245,32 @@ export function buildDeliveryMapHtml(opts: DeliveryMapInitOptions): string {
 
   L.control.attribution({ position: "bottomright", prefix: false }).addTo(map);
 
-  var voyagerLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-    attribution: "&copy; OSM &copy; CARTO",
-    maxZoom: 19
-  });
-
-  var osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  var osmLayer = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap",
     maxZoom: 19
   });
 
-  voyagerLayer.addTo(map);
+  var esriLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+    attribution: "&copy; Esri &copy; OSM",
+    maxZoom: 19
+  });
+
+  var osmTileErrors = 0;
+  osmLayer.on("tileerror", function() {
+    osmTileErrors++;
+    if (osmTileErrors >= 3 && !state.useAltLayer) {
+      state.useAltLayer = true;
+      map.removeLayer(osmLayer);
+      esriLayer.addTo(map);
+      var btn = document.getElementById("btnLayer");
+      if (btn) {
+        btn.textContent = "Street Map";
+        btn.classList.add("active");
+      }
+    }
+  });
+
+  osmLayer.addTo(map);
 
   function makePin(bg, letter) {
     return L.divIcon({
@@ -449,17 +464,17 @@ export function buildDeliveryMapHtml(opts: DeliveryMapInitOptions): string {
   });
 
   document.getElementById("btnLayer").addEventListener("click", function() {
-    state.useOsmStandard = !state.useOsmStandard;
+    state.useAltLayer = !state.useAltLayer;
     var btn = document.getElementById("btnLayer");
-    if (state.useOsmStandard) {
-      map.removeLayer(voyagerLayer);
-      osmLayer.addTo(map);
-      btn.textContent = "Clean Map";
+    if (state.useAltLayer) {
+      map.removeLayer(osmLayer);
+      esriLayer.addTo(map);
+      btn.textContent = "Street Map";
       btn.classList.add("active");
     } else {
-      map.removeLayer(osmLayer);
-      voyagerLayer.addTo(map);
-      btn.textContent = "Street Map";
+      map.removeLayer(esriLayer);
+      osmLayer.addTo(map);
+      btn.textContent = "Clean Map";
       btn.classList.remove("active");
     }
   });

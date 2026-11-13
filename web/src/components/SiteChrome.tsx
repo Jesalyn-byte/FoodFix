@@ -503,7 +503,7 @@ export function FloatingUtilities({
             }
           }}
         >
-          <MessageCircle size={17} /> Contact Support
+          <MessageCircle size={17} /> Live Chat
         </button>
       </div>
 
@@ -549,7 +549,7 @@ export function FloatingUtilities({
         <div className="ff-modal-overlay" onClick={() => setContactOpen(false)}>
           <div className="ff-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <strong style={{ fontSize: 17 }}>Derick&apos;s Food House Support</strong>
+              <strong style={{ fontSize: 17 }}>FoodFix Store · Live Chat</strong>
               <button type="button" className="ff-icon-btn" onClick={() => setContactOpen(false)}>
                 <X size={16} />
               </button>
@@ -558,7 +558,7 @@ export function FloatingUtilities({
             {contactSent ? (
               <div style={{ textAlign: "center", padding: "18px 8px" }}>
                 <Check size={36} color="#27AE60" />
-                <p style={{ fontWeight: 700, marginTop: 8 }}>Inquiry logged! Sign in to chat live with store support.</p>
+                <p style={{ fontWeight: 700, marginTop: 8 }}>Inquiry logged! Sign in to chat live with FoodFix Store.</p>
                 <button type="button" className="ff-btn ff-btn-primary ff-btn-pill" onClick={() => setContactOpen(false)}>
                   Close
                 </button>

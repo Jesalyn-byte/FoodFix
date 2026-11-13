@@ -199,6 +199,21 @@ async function generateOrderNumber(): Promise<string> {
   return String(next);
 }
 
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value as Record<string, any>)) {
+      if (v === undefined) continue;
+      out[k] = stripUndefined(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 // ==================== MENU ITEMS ====================
 
 export async function getMenuItems(): Promise<MenuItem[]> {
@@ -216,7 +231,7 @@ export function onMenuItemsUpdate(cb: (items: MenuItem[]) => void) {
 export async function addMenuItem(data: Omit<MenuItem, "id" | "created_at">) {
   const now = new Date();
   const ref = await addDoc(collection(db, "menu_items"), {
-    ...data,
+    ...stripUndefined(data),
     created_at: now,
     updated_at: now,
   });
@@ -224,11 +239,27 @@ export async function addMenuItem(data: Omit<MenuItem, "id" | "created_at">) {
 }
 
 export async function updateMenuItem(id: string, data: Partial<MenuItem>) {
-  await updateDoc(doc(db, "menu_items", id), { ...data, updated_at: new Date() } as any);
+  await updateDoc(doc(db, "menu_items", id), {
+    ...stripUndefined(data),
+    updated_at: new Date(),
+  } as any);
 }
 
 export async function deleteMenuItem(id: string) {
   await deleteDoc(doc(db, "menu_items", id));
+}
+
+export interface NormalizedAdjustment {
+  id: string;
+  menu_item_id: string;
+  menu_item_name: string;
+  delta: number;
+  previous_quantity: number | string;
+  new_quantity: number | string;
+  reason: string;
+  notes?: string;
+  staff_name?: string;
+  created_at?: any;
 }
 
 export async function addInventoryAdjustment(data: {
@@ -246,21 +277,133 @@ export async function addInventoryAdjustment(data: {
   await updateDoc(itemRef, {
     stock_quantity: nextQty,
     available: nextQty > 0,
+    updated_at: new Date(),
   });
   await addDoc(collection(db, "inventory_adjustments"), {
-    ...data,
+    menu_item_id: data.menu_item_id,
+    menu_item_name: data.menu_item_name,
+    item_id: data.menu_item_id,
+    item_name: data.menu_item_name,
+    delta: data.delta,
+    adjustment: data.delta,
     previous_quantity: prevQty,
+    previous_qty: prevQty,
     new_quantity: nextQty,
+    reason: data.reason,
+    ...(data.notes ? { notes: data.notes } : {}),
+    staff_name: data.staff_name || "Admin Web",
     created_at: new Date(),
   });
   return { previous_quantity: prevQty, new_quantity: nextQty };
 }
 
-export async function getInventoryAdjustments() {
-  const snap = await getDocs(
-    query(collection(db, "inventory_adjustments"), orderBy("created_at", "desc")),
+export async function logMenuAdjustmentWeb(data: {
+  menu_item_id: string;
+  menu_item_name: string;
+  delta: number;
+  previous_quantity: number | string;
+  new_quantity: number | string;
+  reason: string;
+  notes?: string;
+  staff_name?: string;
+}) {
+  await addDoc(collection(db, "inventory_adjustments"), {
+    menu_item_id: data.menu_item_id,
+    menu_item_name: data.menu_item_name,
+    item_id: data.menu_item_id,
+    item_name: data.menu_item_name,
+    delta: data.delta,
+    adjustment: data.delta,
+    previous_quantity: data.previous_quantity,
+    previous_qty: typeof data.previous_quantity === "number" ? data.previous_quantity : 0,
+    new_quantity: data.new_quantity,
+    reason: data.reason,
+    ...(data.notes ? { notes: data.notes } : {}),
+    staff_name: data.staff_name || "Admin Web",
+    created_at: new Date(),
+  });
+}
+
+export async function getInventoryAdjustments(): Promise<NormalizedAdjustment[]> {
+  const snap = await getDocs(collection(db, "inventory_adjustments"));
+  const rows = snap.docs.map((d) => {
+    const raw = d.data() as any;
+    const prev = raw.previous_quantity ?? raw.previous_qty ?? 0;
+    const delta = raw.delta ?? raw.adjustment ?? 0;
+    const nextVal =
+      raw.new_quantity ?? (typeof prev === "number" && typeof delta === "number" ? Math.max(0, prev + delta) : "");
+    return {
+      id: d.id,
+      menu_item_id: raw.menu_item_id || raw.item_id || "",
+      menu_item_name: raw.menu_item_name || raw.item_name || "Menu Item",
+      delta: Number(delta || 0),
+      previous_quantity: prev,
+      new_quantity: nextVal,
+      reason: raw.reason || "adjustment",
+      notes: raw.notes || "",
+      staff_name: raw.staff_name || raw.admin_id || "Admin",
+      created_at: raw.created_at,
+    } as NormalizedAdjustment;
+  });
+  return sortNewestFirst(rows);
+}
+
+// ==================== FAVORITES & DISH SUGGESTIONS ====================
+
+export interface FavoriteRecord {
+  id: string;
+  user_id: string;
+  menu_item_id: string;
+  created_at?: any;
+}
+
+export function onFavoritesUpdate(userId: string, cb: (favs: FavoriteRecord[]) => void) {
+  const q = query(collection(db, "favorites"), where("user_id", "==", userId));
+  return onSnapshot(
+    q,
+    (snap) => {
+      cb(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as FavoriteRecord[]);
+    },
+    () => cb([]),
   );
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+}
+
+export async function toggleFavoriteWeb(
+  userId: string,
+  menuItemId: string,
+  existingFavId?: string,
+): Promise<boolean> {
+  if (existingFavId) {
+    await deleteDoc(doc(db, "favorites", existingFavId));
+    return false;
+  }
+  await addDoc(collection(db, "favorites"), {
+    user_id: userId,
+    menu_item_id: menuItemId,
+    created_at: new Date(),
+  });
+  return true;
+}
+
+export async function submitDishSuggestionWeb(data: {
+  name: string;
+  description?: string;
+  user_id: string;
+  user_email?: string;
+  user_name?: string;
+  nutrition?: any;
+}) {
+  await addDoc(collection(db, "menu_suggestions"), {
+    name: data.name.trim(),
+    description: (data.description || "").trim(),
+    category: "suggestion",
+    user_id: data.user_id,
+    user_email: data.user_email || "",
+    user_name: data.user_name || "",
+    status: "pending",
+    nutrition: stripUndefined(data.nutrition || {}),
+    created_at: new Date(),
+  });
 }
 
 // ==================== ORDERS ====================
@@ -268,20 +411,21 @@ export async function getInventoryAdjustments() {
 export async function validateStockAndDeduct(
   items: { menu_item_id: string; name: string; quantity: number }[],
 ) {
+  const isMtoItem = (d: any) => Boolean(d?.is_made_to_order || d?.category === "Made to Order");
   for (const item of items) {
     const itemRef = doc(db, "menu_items", item.menu_item_id);
     const snap = await getDoc(itemRef);
     if (!snap.exists()) throw new Error(`${item.name} is no longer available.`);
     const data = snap.data() as any;
     if (!data.available) throw new Error(`${item.name} is currently marked sold out.`);
-    if (!data.is_made_to_order && Number(data.stock_quantity || 0) < item.quantity) {
+    if (!isMtoItem(data) && Number(data.stock_quantity || 0) < item.quantity) {
       throw new Error(`Insufficient stock for ${item.name} (${data.stock_quantity} left).`);
     }
   }
   for (const item of items) {
     const itemRef = doc(db, "menu_items", item.menu_item_id);
     const snap = await getDoc(itemRef);
-    if (snap.exists() && !snap.data()?.is_made_to_order) {
+    if (snap.exists() && !isMtoItem(snap.data())) {
       const next = Math.max(0, Number(snap.data()?.stock_quantity || 0) - item.quantity);
       await updateDoc(itemRef, { stock_quantity: next, available: next > 0 });
     }
@@ -308,7 +452,7 @@ export async function createOrder(data: {
   await validateStockAndDeduct(data.items);
   const order_number = await generateOrderNumber();
   const ref = await addDoc(collection(db, "orders"), {
-    ...data,
+    ...stripUndefined(data),
     order_number,
     status: "pending" as OrderStatus,
     created_at: new Date(),

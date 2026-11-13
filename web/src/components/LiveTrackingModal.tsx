@@ -237,7 +237,7 @@ export function LiveTrackingModal({
         </div>
 
         {/* Order Details & Rider Info */}
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, alignItems: "start" }}>
           <div style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid var(--ff-border)", fontSize: 12.5 }}>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>{order.customer_name}</div>
             <div style={{ color: "var(--ff-espresso-muted)" }}>{order.customer_address}</div>

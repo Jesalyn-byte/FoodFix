@@ -688,6 +688,111 @@ textarea:focus-visible {
   }
 }
 
+.ff-menu-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ff-menu-img-wrap {
+  height: 180px;
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+  background: var(--ff-cream-card);
+}
+
+.ff-menu-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), filter 0.25s ease;
+}
+
+.ff-menu-card:hover .ff-menu-img,
+.ff-menu-img-wrap:hover .ff-menu-img {
+  transform: scale(1.07);
+}
+
+.ff-menu-hover-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(46, 26, 6, 0.72) 0%, rgba(46, 26, 6, 0.12) 55%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 10px;
+  pointer-events: none;
+}
+
+.ff-menu-card:hover .ff-menu-hover-overlay,
+.ff-menu-img-wrap:hover .ff-menu-hover-overlay {
+  opacity: 1;
+}
+
+.ff-menu-fav-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.92);
+  color: #e74c3c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
+  transition: transform 0.16s ease, background-color 0.16s ease;
+}
+
+.ff-menu-fav-btn:hover {
+  transform: scale(1.1);
+  background: #ffffff;
+}
+
+.ff-address-autocomplete {
+  position: relative;
+}
+
+.ff-address-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 80;
+  background: var(--ff-white);
+  border: 1px solid var(--ff-border-warm);
+  border-radius: 14px;
+  box-shadow: var(--ff-shadow-lg);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.ff-address-option {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ff-espresso);
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.35;
+}
+
+.ff-address-option:hover {
+  background: var(--ff-orange-tint);
+}
+
 /* ==================== MOBILE / RESPONSIVE ==================== */
 
 .ff-mobile-header {

@@ -1,16 +1,20 @@
 import {
   Camera,
+  ChevronRight,
   Clock,
+  Copy,
   ExternalLink,
   Flag,
+  Heart,
   Home,
   LogOut,
   MapPin,
   Menu as MenuIcon,
+  MessageCircle,
   MessageSquare,
   Minus,
+  Navigation,
   Plus,
-  Printer,
   Receipt,
   Search,
   Send,
@@ -21,8 +25,10 @@ import {
   Trash2,
   User as UserIcon,
   Utensils,
+  UtensilsCrossed,
+  X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   MENU_CATEGORIES,
   MENU_CATEGORY_COLORS,
@@ -32,6 +38,8 @@ import {
   type OrderType,
   type PaymentMethod,
 } from "@shared/constants/order";
+import AddressAutocomplete from "../../components/AddressAutocomplete";
+import ConfirmModal from "../../components/ConfirmModal";
 import { LiveTrackingModal } from "../../components/LiveTrackingModal";
 import OrderBreakdown from "../../components/OrderBreakdown";
 import {
@@ -39,7 +47,6 @@ import {
   FloatingUtilities,
   GlobalSearchModal,
   NewsletterSignup,
-  PrintButton,
   ThemeToggleButton,
   withUtm,
   type SearchEntry,
@@ -58,13 +65,19 @@ import {
   getBanners,
   getSettings,
   notifyGcashPayment,
+  onFavoritesUpdate,
+  onLocationUpdate,
   onMenuItemsUpdate,
   onMessagesUpdate,
   onOrdersByUserUpdate,
   requestRefund,
   sendMessage,
+  submitDishSuggestionWeb,
+  toggleFavoriteWeb,
   type AppSettings,
   type Banner,
+  type FavoriteRecord,
+  type LiveLocation,
   type MenuItem,
   type Message,
   type Order,
@@ -78,7 +91,18 @@ interface CartItem {
   price: number;
   quantity: number;
   stock_quantity: number;
+  is_made_to_order?: boolean;
   image_url?: string;
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 const LAMION_WELCOME =
@@ -111,9 +135,11 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [supportMsgs, setSupportMsgs] = useState<Message[]>([]);
 
-  // Menu search & category
+  // Menu search, category & favorites & per-item quantity selector
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState("");
+  const [favorites, setFavorites] = useState<FavoriteRecord[]>([]);
+  const [menuQty, setMenuQty] = useState<Record<string, number>>({});
 
   // Cart & Checkout
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -128,9 +154,12 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cod");
   const [phone, setPhone] = useState(profile.phone || "");
   const [address, setAddress] = useState(profile.address || "");
+  const [deliveryCoords, setDeliveryCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [orderNote, setOrderNote] = useState("");
   const [placing, setPlacing] = useState(false);
   const [gcashPrompt, setGcashPrompt] = useState<{ orderId: string; orderNumber: string; amount: number } | null>(null);
+  const [qrZoomOpen, setQrZoomOpen] = useState(false);
+  const [removeCartItem, setRemoveCartItem] = useState<CartItem | null>(null);
 
   // Lamion AI Chat
   const [aiMessages, setAiMessages] = useState<{ role: "ai" | "user"; text: string; at: number }[]>([
@@ -145,16 +174,30 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
   const [scanLoading, setScanLoading] = useState(false);
   const [scanResult, setScanResult] = useState<any>(null);
 
-  // Support Chat
+  // Live Chat with FoodFix Store
   const [supportInput, setSupportInput] = useState("");
 
-  // Review & Refund Modals
+  // Review, Refund, Tracking, Submit Dish & Ask FOFI Delivery Modals
   const [reviewOrder, setReviewOrder] = useState<Order | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [refundOrder, setRefundOrder] = useState<Order | null>(null);
   const [refundReason, setRefundReason] = useState("");
   const [trackOrder, setTrackOrder] = useState<Order | null>(null);
+
+  // Submit a Dish modal
+  const [submitModalOpen, setSubmitModalOpen] = useState(false);
+  const [submitDishName, setSubmitDishName] = useState("");
+  const [submitDishNotes, setSubmitDishNotes] = useState("");
+  const [submittingDish, setSubmittingDish] = useState(false);
+
+  // Ask FOFI about Delivery modal
+  const [fofiOpen, setFofiOpen] = useState(false);
+  const [fofiOrder, setFofiOrder] = useState<Order | null>(null);
+  const [fofiDriverLoc, setFofiDriverLoc] = useState<LiveLocation | null>(null);
+  const [fofiMessages, setFofiMessages] = useState<{ role: "ai" | "user"; text: string }[]>([]);
+  const [fofiInput, setFofiInput] = useState("");
+  const fofiUnsubRef = useRef<(() => void) | null>(null);
 
   // Profile Editor
   const [editName, setEditName] = useState(profile.username || "");
@@ -169,12 +212,15 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
     getBanners().then((b) => setBanners(b.filter((x) => x.active))).catch(() => {});
     getSettings().then(setSettings).catch(() => {});
     const unsubMenu = onMenuItemsUpdate(setMenuItems);
+    const unsubFavs = onFavoritesUpdate(profile.id, setFavorites);
     const unsubOrders = onOrdersByUserUpdate(profile.id, setOrders);
     const unsubMsgs = onMessagesUpdate(profile.id, setSupportMsgs);
     return () => {
       unsubMenu();
+      unsubFavs();
       unsubOrders();
       unsubMsgs();
+      fofiUnsubRef.current?.();
     };
   }, [profile.id]);
 
@@ -189,27 +235,65 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
       : 0;
   const grandTotal = subtotal + deliveryFee;
 
+  const favoriteMap = useMemo(() => {
+    const map = new Map<string, string>();
+    favorites.forEach((f) => map.set(f.menu_item_id, f.id));
+    return map;
+  }, [favorites]);
+
+  const menuCategories = useMemo(() => {
+    const set = new Set<string>([
+      ...MENU_CATEGORIES,
+      ...menuItems.map((m) => m.category).filter(Boolean),
+    ]);
+    return Array.from(set);
+  }, [menuItems]);
+
   const filteredMenu = useMemo(() => {
     return menuItems.filter((item) => {
-      if (activeCat && item.category !== activeCat) return false;
+      if (activeCat === "__favorites__") {
+        if (!favoriteMap.has(item.id)) return false;
+      } else if (activeCat === "Made to Order") {
+        if (item.category !== "Made to Order" && !item.is_made_to_order) return false;
+      } else if (activeCat && item.category !== activeCat) {
+        return false;
+      }
       if (search.trim()) {
         const s = search.trim().toLowerCase();
         return item.name.toLowerCase().includes(s) || item.description?.toLowerCase().includes(s);
       }
       return true;
     });
-  }, [menuItems, activeCat, search]);
+  }, [menuItems, activeCat, search, favoriteMap]);
 
-  function addToCart(item: MenuItem) {
-    if (!item.available || (!item.is_made_to_order && item.stock_quantity <= 0)) {
+  function getSelectedQty(item: MenuItem): number {
+    const raw = menuQty[item.id] ?? 1;
+    const isMto = Boolean(item.is_made_to_order || item.category === "Made to Order");
+    const max = isMto ? 99 : Math.max(1, Number(item.stock_quantity || 1));
+    return Math.min(max, Math.max(1, raw));
+  }
+
+  function stepSelectedQty(item: MenuItem, delta: number) {
+    const isMto = Boolean(item.is_made_to_order || item.category === "Made to Order");
+    const max = isMto ? 99 : Math.max(1, Number(item.stock_quantity || 1));
+    const current = getSelectedQty(item);
+    const next = Math.min(max, Math.max(1, current + delta));
+    setMenuQty((prev) => ({ ...prev, [item.id]: next }));
+  }
+
+  function addToCart(item: MenuItem, qty = 1) {
+    const isMto = Boolean(item.is_made_to_order || item.category === "Made to Order");
+    if (!item.available || (!isMto && item.stock_quantity <= 0)) {
       toast.error(`${item.name} is sold out.`);
       return;
     }
+    const maxAllowed = isMto ? 999 : Number(item.stock_quantity || 0);
     setCart((prev) => {
       const existing = prev.find((c) => c.menu_item_id === item.id);
       if (existing) {
+        const nextQty = Math.min(maxAllowed, existing.quantity + qty);
         return prev.map((c) =>
-          c.menu_item_id === item.id ? { ...c, quantity: c.quantity + 1 } : c,
+          c.menu_item_id === item.id ? { ...c, quantity: nextQty, is_made_to_order: isMto } : c,
         );
       }
       return [
@@ -218,13 +302,15 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
           menu_item_id: item.id,
           name: item.name,
           price: item.price,
-          quantity: 1,
+          quantity: Math.min(maxAllowed, Math.max(1, qty)),
           stock_quantity: item.stock_quantity,
+          is_made_to_order: isMto,
           image_url: item.image_url,
         },
       ];
     });
-    toast.success(`Added ${item.name} to cart`);
+    setMenuQty((prev) => ({ ...prev, [item.id]: 1 }));
+    toast.success(`Added ${qty > 1 ? `${qty}× ` : ""}${item.name} to cart`);
   }
 
   async function handleCheckout(e: FormEvent) {
@@ -236,11 +322,28 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
     }
     setPlacing(true);
     try {
+      let coords = deliveryCoords;
+      if (!coords && (orderType === "delivery_now" || orderType === "delivery_later")) {
+        try {
+          const geoRes = await fetch(
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address.trim())}&format=json&limit=1&countrycodes=ph`,
+          );
+          if (geoRes.ok) {
+            const rows = (await geoRes.json()) as any[];
+            if (rows?.[0]?.lat && rows?.[0]?.lon) {
+              coords = { lat: Number(rows[0].lat), lng: Number(rows[0].lon) };
+            }
+          }
+        } catch {
+          // Optional geocode fallback
+        }
+      }
       const { id, order_number } = await createOrder({
         customer_id: profile.id,
         customer_name: profile.username,
         customer_phone: phone.trim(),
         customer_address: address.trim(),
+        ...(coords ? { customer_lat: coords.lat, customer_lng: coords.lng } : {}),
         order_note: orderNote.trim(),
         items: cart.map((c) => ({
           menu_item_id: c.menu_item_id,
@@ -268,6 +371,67 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
     } finally {
       setPlacing(false);
     }
+  }
+
+  function openAskFofiDelivery() {
+    const active = orders.find((o) =>
+      ["pending", "accepted", "preparing", "out_for_delivery"].includes(o.status),
+    );
+    fofiUnsubRef.current?.();
+    fofiUnsubRef.current = null;
+    setFofiDriverLoc(null);
+    setFofiOrder(active || null);
+    if (!active) {
+      setFofiMessages([
+        {
+          role: "ai",
+          text: "Hi! I'm FOFI, your delivery assistant. You don't have an active order in progress right now. Place an order anytime and I'll track your rider's distance and ETA!",
+        },
+      ]);
+    } else {
+      setFofiMessages([
+        {
+          role: "ai",
+          text: `Hi! I'm FOFI, your delivery assistant for Order #${active.order_number} (${ORDER_STATUS_LABELS[active.status]}). Ask me where your rider is or how long delivery will take!`,
+        },
+      ]);
+      fofiUnsubRef.current = onLocationUpdate(active.id, "staff", setFofiDriverLoc);
+    }
+    setFofiOpen(true);
+  }
+
+  function answerFofiDelivery(question: string) {
+    const q = question.trim();
+    if (!q) return;
+    setFofiInput("");
+    setFofiMessages((prev) => [...prev, { role: "user", text: q }]);
+
+    let reply = "You currently have no active order.";
+    if (fofiOrder) {
+      const ql = q.toLowerCase();
+      if (!fofiDriverLoc) {
+        reply = `Order #${fofiOrder.order_number} is currently ${ORDER_STATUS_LABELS[fofiOrder.status]}. Waiting for your rider to share live GPS — once they head out, I will calculate exact distance & ETA!`;
+      } else {
+        const destLat = fofiOrder.customer_lat ?? settings?.store_lat ?? 14.031902;
+        const destLng = fofiOrder.customer_lng ?? settings?.store_lng ?? 121.206633;
+        const dist = haversineKm(fofiDriverLoc.lat, fofiDriverLoc.lng, destLat, destLng);
+        const speed = fofiDriverLoc.speed && fofiDriverLoc.speed > 2 ? fofiDriverLoc.speed : 25;
+        const mins = Math.max(1, Math.round((dist / speed) * 60));
+        const distLabel = dist < 1 ? `${Math.round(dist * 1000)} m` : `${dist.toFixed(1)} km`;
+        if (ql.includes("where") || ql.includes("driver") || ql.includes("rider") || ql.includes("location")) {
+          reply = dist < 0.3
+            ? `Your rider is less than 300 meters away from ${fofiOrder.customer_address}!`
+            : `Your rider is ${distLabel} away, moving at ~${speed} km/h (~${mins} min ETA).`;
+        } else if (ql.includes("long") || ql.includes("eta") || ql.includes("when") || ql.includes("time")) {
+          reply = `Estimated arrival for Order #${fofiOrder.order_number} is ~${mins} min (${distLabel} remaining).`;
+        } else {
+          reply = `Order #${fofiOrder.order_number} (${ORDER_STATUS_LABELS[fofiOrder.status]}): rider is ${distLabel} away, ETA ~${mins} min.`;
+        }
+      }
+    }
+    setTimeout(() => {
+      setFofiMessages((prev) => [...prev, { role: "ai", text: reply }]);
+    }, 180);
   }
 
   async function askLamion(question: string) {
@@ -320,7 +484,7 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
     { key: "orders", label: "My Orders", icon: Receipt, badge: activeOrdersCount },
     { key: "lamion", label: "Lamion AI", icon: Sparkles },
     { key: "scanner", label: "Dish Scanner", icon: Camera },
-    { key: "chat", label: "Support Chat", icon: MessageSquare },
+    { key: "chat", label: "Chat", icon: MessageSquare },
     { key: "profile", label: "Profile", icon: UserIcon },
   ];
 
@@ -446,7 +610,6 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
             >
               <Search size={14} /> Search
             </button>
-            <PrintButton />
             <ThemeToggleButton dark={dark} onToggle={onToggleDark} />
             <button type="button" className="ff-btn ff-btn-soft ff-no-print" onClick={() => setTab("lamion")}>
               <Sparkles size={15} /> Ask Lamion AI
@@ -595,7 +758,18 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                   >
                     All
                   </button>
-                  {MENU_CATEGORIES.map((c) => (
+                  <button
+                    type="button"
+                    className="ff-btn ff-btn-pill"
+                    style={{
+                      background: activeCat === "__favorites__" ? "#E74C3C" : "#FFF0F2",
+                      color: activeCat === "__favorites__" ? "#fff" : "#C0392B",
+                    }}
+                    onClick={() => setActiveCat("__favorites__")}
+                  >
+                    <Heart size={13} fill={activeCat === "__favorites__" ? "#fff" : "#E74C3C"} /> Favorites ({favorites.length})
+                  </button>
+                  {menuCategories.map((c) => (
                     <button
                       key={c}
                       type="button"
@@ -609,42 +783,155 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                 </div>
               </div>
 
-              <div className="ff-grid-3">
-                {filteredMenu.map((item) => {
-                  const catColor = MENU_CATEGORY_COLORS[item.category] || "#F25C05";
-                  const soldOut = !item.available || (!item.is_made_to_order && item.stock_quantity <= 0);
-                  return (
-                    <div key={item.id} className="ff-card ff-card-hover" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      <div style={{ height: 175, borderRadius: 14, overflow: "hidden", position: "relative", background: "var(--ff-cream-card)" }}>
-                        {item.image_url && (
-                          <img src={item.image_url} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              {filteredMenu.length === 0 ? (
+                <div className="ff-card" style={{ textAlign: "center", padding: 38, color: "var(--ff-espresso-muted)" }}>
+                  {activeCat === "__favorites__"
+                    ? "You have no favorite dishes yet. Tap the heart icon on any dish to save it here!"
+                    : "No dishes match your filter."}
+                </div>
+              ) : (
+                <div className="ff-grid-3">
+                  {filteredMenu.map((item) => {
+                    const catColor = MENU_CATEGORY_COLORS[item.category] || "#F25C05";
+                    const isMto = Boolean(item.is_made_to_order || item.category === "Made to Order");
+                    const soldOut = !item.available || (!isMto && item.stock_quantity <= 0);
+                    const favId = favoriteMap.get(item.id);
+                    const inCartQty = cart.find((c) => c.menu_item_id === item.id)?.quantity || 0;
+                    const qty = getSelectedQty(item);
+
+                    return (
+                      <div key={item.id} className="ff-card ff-card-hover ff-menu-card" style={{ opacity: soldOut ? 0.65 : 1 }}>
+                        <div className="ff-menu-img-wrap">
+                          {item.image_url ? (
+                            <img src={item.image_url} alt={item.name} className="ff-menu-img" />
+                          ) : (
+                            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ff-gray)" }}>
+                              No Image
+                            </div>
+                          )}
+                          <span className="ff-badge" style={{ position: "absolute", top: 10, left: 10, background: catColor, color: "#fff", zIndex: 2 }}>
+                            {item.category}
+                          </span>
+                          <button
+                            type="button"
+                            className="ff-menu-fav-btn"
+                            aria-label={favId ? `Remove ${item.name} from favorites` : `Save ${item.name} to favorites`}
+                            onClick={async () => {
+                              try {
+                                const added = await toggleFavoriteWeb(profile.id, item.id, favId);
+                                toast.info(added ? `Added ${item.name} to Favorites` : `Removed ${item.name} from Favorites`);
+                              } catch (err: any) {
+                                toast.error(err?.message || "Could not update favorite");
+                              }
+                            }}
+                          >
+                            <Heart size={16} color="#E74C3C" fill={favId ? "#E74C3C" : "transparent"} />
+                          </button>
+                          {isMto && (
+                            <span
+                              className="ff-badge"
+                              style={{ position: "absolute", bottom: 10, left: 10, background: "#8B4513", color: "#fff", zIndex: 2 }}
+                            >
+                              Made to Order
+                            </span>
+                          )}
+                          {inCartQty > 0 && (
+                            <span
+                              className="ff-badge"
+                              style={{ position: "absolute", bottom: 10, right: 10, background: "#27AE60", color: "#fff", zIndex: 2 }}
+                            >
+                              {inCartQty} in cart
+                            </span>
+                          )}
+                          {!soldOut && (
+                            <div className="ff-menu-hover-overlay">
+                              <span style={{ color: "#fff", fontSize: 11.5, fontWeight: 700 }}>
+                                {isMto ? "Cooked Fresh to Order" : `${item.stock_quantity} left in stock`}
+                              </span>
+                            </div>
+                          )}
+                          {soldOut && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                inset: 0,
+                                background: "rgba(20,10,2,0.52)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                zIndex: 2,
+                              }}
+                            >
+                              <span className="ff-badge" style={{ background: "#E74C3C", color: "#fff", fontSize: 12 }}>
+                                SOLD OUT
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                          <strong style={{ fontSize: 16 }}>{item.name}</strong>
+                          <strong style={{ fontSize: 16, color: "#F25C05" }}>₱{item.price.toFixed(2)}</strong>
+                        </div>
+                        <p style={{ margin: 0, fontSize: 12.5, color: "var(--ff-espresso-muted)", flex: 1 }}>
+                          {item.description}
+                        </p>
+                        <div className="ff-timestamp">
+                          <Clock size={11} /> Updated {formatTimeAgo(item.updated_at || item.created_at)}
+                        </div>
+
+                        {soldOut ? (
+                          <button type="button" disabled className="ff-btn ff-btn-outline ff-btn-pill">
+                            Sold Out
+                          </button>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                                padding: "3px 6px",
+                                borderRadius: 999,
+                                border: "1px solid var(--ff-border-warm)",
+                                background: "var(--ff-cream-soft)",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="ff-icon-btn"
+                                style={{ width: 28, height: 28, borderRadius: 999 }}
+                                aria-label={`Decrease ${item.name} quantity`}
+                                onClick={() => stepSelectedQty(item, -1)}
+                              >
+                                <Minus size={13} />
+                              </button>
+                              <strong style={{ minWidth: 20, textAlign: "center", fontSize: 13 }}>{qty}</strong>
+                              <button
+                                type="button"
+                                className="ff-icon-btn"
+                                style={{ width: 28, height: 28, borderRadius: 999 }}
+                                aria-label={`Increase ${item.name} quantity`}
+                                onClick={() => stepSelectedQty(item, 1)}
+                              >
+                                <Plus size={13} />
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className="ff-btn ff-btn-primary ff-btn-pill"
+                              style={{ flex: 1 }}
+                              onClick={() => addToCart(item, qty)}
+                            >
+                              <ShoppingCart size={15} /> Add {qty > 1 ? `(${qty})` : "to Cart"}
+                            </button>
+                          </div>
                         )}
-                        <span className="ff-badge" style={{ position: "absolute", top: 10, left: 10, background: catColor, color: "#fff" }}>
-                          {item.category}
-                        </span>
                       </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <strong style={{ fontSize: 16 }}>{item.name}</strong>
-                        <strong style={{ fontSize: 16, color: "#F25C05" }}>₱{item.price.toFixed(2)}</strong>
-                      </div>
-                      <p style={{ margin: 0, fontSize: 12.5, color: "var(--ff-espresso-muted)", flex: 1 }}>
-                        {item.description}
-                      </p>
-                      <div className="ff-timestamp">
-                        <Clock size={11} /> Updated {formatTimeAgo(item.updated_at || item.created_at)}
-                      </div>
-                      <button
-                        type="button"
-                        disabled={soldOut}
-                        className={`ff-btn ${soldOut ? "ff-btn-outline" : "ff-btn-primary"} ff-btn-pill`}
-                        onClick={() => addToCart(item)}
-                      >
-                        <ShoppingCart size={15} /> {soldOut ? "Sold Out" : "Add to Cart"}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -673,13 +960,15 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                             type="button"
                             className="ff-btn ff-btn-outline"
                             style={{ padding: 6 }}
-                            onClick={() =>
+                            onClick={() => {
+                              if (c.quantity <= 1) {
+                                setRemoveCartItem(c);
+                                return;
+                              }
                               setCart((prev) =>
-                                prev
-                                  .map((x) => (x.menu_item_id === c.menu_item_id ? { ...x, quantity: x.quantity - 1 } : x))
-                                  .filter((x) => x.quantity > 0),
-                              )
-                            }
+                                prev.map((x) => (x.menu_item_id === c.menu_item_id ? { ...x, quantity: x.quantity - 1 } : x)),
+                              );
+                            }}
                           >
                             <Minus size={14} />
                           </button>
@@ -688,11 +977,16 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                             type="button"
                             className="ff-btn ff-btn-outline"
                             style={{ padding: 6 }}
-                            onClick={() =>
+                            onClick={() => {
+                              const cap = c.is_made_to_order ? 999 : c.stock_quantity || 999;
+                              if (c.quantity >= cap) {
+                                toast.info(`Maximum available stock reached (${cap}).`);
+                                return;
+                              }
                               setCart((prev) =>
                                 prev.map((x) => (x.menu_item_id === c.menu_item_id ? { ...x, quantity: x.quantity + 1 } : x)),
-                              )
-                            }
+                              );
+                            }}
                           >
                             <Plus size={14} />
                           </button>
@@ -700,7 +994,7 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                             type="button"
                             className="ff-btn ff-btn-danger-soft"
                             style={{ padding: 6 }}
-                            onClick={() => setCart((prev) => prev.filter((x) => x.menu_item_id !== c.menu_item_id))}
+                            onClick={() => setRemoveCartItem(c)}
                           >
                             <Trash2 size={14} />
                           </button>
@@ -729,7 +1023,15 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                 </select>
 
                 <input className="ff-input" placeholder="Contact Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-                <input className="ff-input" placeholder="Delivery Address" value={address} onChange={(e) => setAddress(e.target.value)} />
+                <AddressAutocomplete
+                  value={address}
+                  coords={deliveryCoords}
+                  placeholder="Search delivery place or street..."
+                  onChange={(nextAddr, nextCoords) => {
+                    setAddress(nextAddr);
+                    setDeliveryCoords(nextCoords ?? null);
+                  }}
+                />
                 <input className="ff-input" placeholder="Order note (optional)" value={orderNote} onChange={(e) => setOrderNote(e.target.value)} />
 
                 <button type="submit" disabled={placing || cart.length === 0} className="ff-btn ff-btn-primary ff-btn-pill" style={{ height: 46 }}>
@@ -750,6 +1052,13 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                 <div className="ff-grid-2">
                   {orders.map((o) => {
                     const color = ORDER_STATUS_COLORS[o.status] || "#888";
+                    const isActiveOrder = ["pending", "accepted", "preparing", "out_for_delivery"].includes(o.status);
+                    const queueIdx = isActiveOrder
+                      ? [...orders]
+                          .filter((x) => ["pending", "accepted", "preparing", "out_for_delivery"].includes(x.status))
+                          .reverse()
+                          .findIndex((x) => x.id === o.id) + 1
+                      : 0;
                     return (
                       <div key={o.id} className="ff-card ff-card-hover" style={{ borderLeft: `4px solid ${color}`, display: "flex", flexDirection: "column", gap: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -759,16 +1068,12 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                               <Clock size={11} /> Updated {formatTimeAgo(o.updated_at || o.created_at)}
                             </div>
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <button
-                              type="button"
-                              className="ff-icon-btn ff-no-print"
-                              style={{ width: 32, height: 32 }}
-                              title="Print receipt"
-                              onClick={() => window.print()}
-                            >
-                              <Printer size={14} />
-                            </button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            {queueIdx > 0 && (
+                              <span className="ff-badge" style={{ background: "#FFF0E6", color: "#F25C05" }}>
+                                Queue #{queueIdx}
+                              </span>
+                            )}
                             <span className="ff-badge" style={{ background: `${color}20`, color }}>
                               {ORDER_STATUS_LABELS[o.status]}
                             </span>
@@ -987,15 +1292,25 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
             </div>
           )}
 
-          {/* SUPPORT CHAT */}
+          {/* LIVE CHAT WITH FOODFIX STORE */}
           {tab === "chat" && (
             <div className="ff-card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", height: 580 }}>
-              <div style={{ padding: "14px 20px", borderBottom: "1px solid #F0E4CE", fontWeight: 800 }}>
-                Chat with Derick&apos;s Food House Support
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--ff-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>FoodFix Store · Live Chat</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ff-espresso-muted)" }}>
+                    Direct live chat with store admin
+                  </div>
+                </div>
+                <span className="ff-live-pill">
+                  <span className="ff-live-dot" /> Online
+                </span>
               </div>
               <div style={{ flex: 1, padding: 18, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
                 {supportMsgs.length === 0 ? (
-                  <div style={{ color: "#8C7A6B", textAlign: "center", marginTop: 40 }}>Send a message below for help with your order!</div>
+                  <div style={{ color: "var(--ff-gray)", textAlign: "center", marginTop: 40 }}>
+                    Send a message below to chat live with FoodFix Store!
+                  </div>
                 ) : (
                   supportMsgs.map((m) => {
                     const mine = m.sender_role === "customer";
@@ -1012,7 +1327,9 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                         }}
                       >
                         <div>{m.content}</div>
-                        <div style={{ fontSize: 10.5, opacity: 0.78, marginTop: 3 }}>{m.sender_name}</div>
+                        <div style={{ fontSize: 10.5, opacity: 0.78, marginTop: 3 }}>
+                          {mine ? m.sender_name : "FoodFix Store"}
+                        </div>
                       </div>
                     );
                   })
@@ -1031,9 +1348,9 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                   });
                   setSupportInput("");
                 }}
-                style={{ padding: 14, borderTop: "1px solid #F0E4CE", display: "flex", gap: 10 }}
+                style={{ padding: 14, borderTop: "1px solid var(--ff-border)", display: "flex", gap: 10 }}
               >
-                <input className="ff-input" placeholder="Message store support..." value={supportInput} onChange={(e) => setSupportInput(e.target.value)} />
+                <input className="ff-input" placeholder="Message FoodFix Store..." value={supportInput} onChange={(e) => setSupportInput(e.target.value)} />
                 <button type="submit" className="ff-btn ff-btn-primary"><Send size={15} /> Send</button>
               </form>
             </div>
@@ -1041,47 +1358,216 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
 
           {/* PROFILE */}
           {tab === "profile" && (
-            <div className="ff-card" style={{ maxWidth: 520, display: "flex", flexDirection: "column", gap: 12 }}>
-              <h3 style={{ margin: 0 }}>My Profile</h3>
-              <input className="ff-input" placeholder="Full Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
-              <input className="ff-input" placeholder="Phone Number" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
-              <input className="ff-input" placeholder="Default Delivery Address" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} />
-              <button
-                type="button"
-                className="ff-btn ff-btn-primary ff-btn-pill"
-                onClick={async () => {
-                  await updateProfileDoc(profile.id, {
-                    username: editName.trim(),
-                    phone: editPhone.trim(),
-                    address: editAddress.trim(),
-                  });
-                  toast.success("Profile updated!");
-                }}
-              >
-                Save Profile
-              </button>
+            <div className="ff-workspace-2">
+              <div className="ff-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, paddingBottom: 12, borderBottom: "1px solid var(--ff-border)" }}>
+                  <div
+                    style={{
+                      width: 54,
+                      height: 54,
+                      borderRadius: 999,
+                      background: "var(--ff-orange)",
+                      color: "#fff",
+                      display: "grid",
+                      placeItems: "center",
+                      fontSize: 22,
+                      fontWeight: 800,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {(profile.username || "C").charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0 }}>{profile.username}</h3>
+                    <div style={{ fontSize: 12.5, color: "var(--ff-espresso-muted)" }}>{profile.email}</div>
+                    <span className="ff-badge" style={{ marginTop: 4, background: "var(--ff-orange-tint)", color: "var(--ff-orange)" }}>
+                      Customer
+                    </span>
+                  </div>
+                </div>
+
+                <label style={{ fontSize: 12, fontWeight: 700 }}>Full Name</label>
+                <input className="ff-input" placeholder="Full Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                <label style={{ fontSize: 12, fontWeight: 700 }}>Phone Number</label>
+                <input className="ff-input" placeholder="Phone Number" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+                <label style={{ fontSize: 12, fontWeight: 700 }}>Default Delivery Address</label>
+                <AddressAutocomplete
+                  value={editAddress}
+                  placeholder="Default Delivery Address"
+                  onChange={(nextAddr, nextCoords) => {
+                    setEditAddress(nextAddr);
+                    setAddress(nextAddr);
+                    if (nextCoords) setDeliveryCoords(nextCoords);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ff-btn ff-btn-primary ff-btn-pill"
+                  onClick={async () => {
+                    await updateProfileDoc(profile.id, {
+                      username: editName.trim(),
+                      phone: editPhone.trim(),
+                      address: editAddress.trim(),
+                    });
+                    toast.success("Profile updated!");
+                  }}
+                >
+                  Save Profile
+                </button>
+              </div>
+
+              <div className="ff-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <h3 style={{ margin: "0 0 4px" }}>Explore &amp; Shortcuts</h3>
+                {[
+                  {
+                    label: "My Favorites",
+                    sub: `${favorites.length} saved dish${favorites.length === 1 ? "" : "es"}`,
+                    icon: Heart,
+                    color: "#E91E63",
+                    action: () => {
+                      setActiveCat("__favorites__");
+                      setTab("menu");
+                    },
+                  },
+                  {
+                    label: "AI Food Scan",
+                    sub: "Upload a dish photo for calories & ingredients",
+                    icon: Camera,
+                    color: "#27AE60",
+                    action: () => setTab("scanner"),
+                  },
+                  {
+                    label: "Submit a Dish",
+                    sub: "Suggest a Filipino dish to FoodFix Store",
+                    icon: UtensilsCrossed,
+                    color: "#F25C05",
+                    action: () => {
+                      setSubmitDishName("");
+                      setSubmitDishNotes("");
+                      setSubmitModalOpen(true);
+                    },
+                  },
+                  {
+                    label: "Live Delivery Tracker",
+                    sub: "Track your active order's real-time map",
+                    icon: Navigation,
+                    color: "#3498DB",
+                    action: () => {
+                      const activeDelivery = orders.find(
+                        (o) =>
+                          (o.order_type === "delivery_now" || o.order_type === "delivery_later") &&
+                          ["pending", "accepted", "preparing", "out_for_delivery"].includes(o.status),
+                      );
+                      if (activeDelivery) {
+                        setTrackOrder(activeDelivery);
+                      } else {
+                        setTab("orders");
+                        toast.info("No active delivery right now — showing your orders.");
+                      }
+                    },
+                  },
+                  {
+                    label: "Ask Lamion AI",
+                    sub: "Filipino culinary Q&A, recipes & cooking tips",
+                    icon: Sparkles,
+                    color: "#F39C12",
+                    action: () => setTab("lamion"),
+                  },
+                  {
+                    label: "Ask FOFI about Delivery",
+                    sub: "Ask FOFI about your rider's distance & ETA",
+                    icon: MessageCircle,
+                    color: "#9B59B6",
+                    action: openAskFofiDelivery,
+                  },
+                ].map((sc) => {
+                  const Icon = sc.icon;
+                  return (
+                    <button
+                      key={sc.label}
+                      type="button"
+                      onClick={sc.action}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        width: "100%",
+                        padding: "11px 12px",
+                        borderRadius: 14,
+                        border: "1px solid var(--ff-border)",
+                        background: "var(--ff-cream-card)",
+                        color: "var(--ff-espresso)",
+                        textAlign: "left",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 12,
+                          background: `${sc.color}1F`,
+                          color: sc.color,
+                          display: "grid",
+                          placeItems: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Icon size={19} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <strong style={{ fontSize: 13.5, display: "block" }}>{sc.label}</strong>
+                        <span style={{ fontSize: 11.5, color: "var(--ff-espresso-muted)" }}>{sc.sub}</span>
+                      </div>
+                      <ChevronRight size={16} color="var(--ff-gray)" />
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </main>
       </div>
 
-      {/* GCash Prompt Modal */}
+      {/* GCash Prompt Modal (Enlarged QR + Copy Number) */}
       {gcashPrompt && (
         <div className="ff-modal-overlay" onClick={() => setGcashPrompt(null)}>
-          <div className="ff-modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+          <div className="ff-modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: "0 0 8px" }}>GCash Payment · Order #{gcashPrompt.orderNumber}</h3>
-            <p style={{ fontSize: 13.5, color: "#6D4C41" }}>
+            <p style={{ fontSize: 13.5, color: "var(--ff-espresso-muted)" }}>
               Amount to Pay: <strong style={{ color: "#F25C05" }}>₱{gcashPrompt.amount.toFixed(2)}</strong>
               <br />
               Store GCash: <strong>{settings?.gcash_number || "0917-FOODFIX"}</strong>
             </p>
+            <button
+              type="button"
+              className="ff-btn ff-btn-soft"
+              style={{ width: "100%", marginBottom: 10 }}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(settings?.gcash_number || "0917-FOODFIX");
+                  toast.success("GCash number copied!");
+                } catch {
+                  toast.error("Could not copy number.");
+                }
+              }}
+            >
+              <Copy size={14} /> Copy GCash Number
+            </button>
             {settings?.gcash_qr_image && (
-              <img src={settings.gcash_qr_image} alt="GCash QR" style={{ width: 200, display: "block", margin: "12px auto", borderRadius: 12 }} />
+              <div style={{ textAlign: "center" }}>
+                <img
+                  src={settings.gcash_qr_image}
+                  alt="GCash QR"
+                  onClick={() => setQrZoomOpen(true)}
+                  style={{ width: 250, height: 250, objectFit: "contain", display: "block", margin: "8px auto", borderRadius: 14, cursor: "zoom-in", border: "1px solid var(--ff-border)", background: "#fff" }}
+                />
+                <span style={{ fontSize: 11.5, color: "var(--ff-gray)" }}>Click QR code to enlarge</span>
+              </div>
             )}
             <button
               type="button"
               className="ff-btn ff-btn-green ff-btn-pill"
-              style={{ width: "100%", marginTop: 8 }}
+              style={{ width: "100%", marginTop: 12 }}
               onClick={async () => {
                 await notifyGcashPayment(gcashPrompt.orderId, profile.username, phone, gcashPrompt.amount, {
                   customerId: profile.id,
@@ -1094,6 +1580,190 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
             >
               I Have Sent Payment
             </button>
+          </div>
+        </div>
+      )}
+
+      {qrZoomOpen && settings?.gcash_qr_image && (
+        <div className="ff-modal-overlay" onClick={() => setQrZoomOpen(false)}>
+          <div className="ff-modal" style={{ maxWidth: 480, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <strong>Scan Store GCash QR</strong>
+              <button type="button" className="ff-icon-btn" onClick={() => setQrZoomOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <img
+              src={settings.gcash_qr_image}
+              alt="Enlarged GCash QR"
+              style={{ width: "100%", maxWidth: 360, height: "auto", borderRadius: 16, background: "#fff", padding: 8 }}
+            />
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={!!removeCartItem}
+        title={`Remove "${removeCartItem?.name || ""}"?`}
+        description="Remove this dish from your cart?"
+        confirmLabel="Remove"
+        onCancel={() => setRemoveCartItem(null)}
+        onConfirm={() => {
+          if (!removeCartItem) return;
+          setCart((prev) => prev.filter((x) => x.menu_item_id !== removeCartItem.menu_item_id));
+          toast.info(`Removed ${removeCartItem.name} from cart`);
+          setRemoveCartItem(null);
+        }}
+      />
+
+      {/* Submit a Dish Modal */}
+      {submitModalOpen && (
+        <div className="ff-modal-overlay" onClick={() => setSubmitModalOpen(false)}>
+          <div className="ff-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Submit a Dish Suggestion</h3>
+              <button type="button" className="ff-icon-btn" onClick={() => setSubmitModalOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <p style={{ marginTop: 0, fontSize: 13, color: "var(--ff-espresso-muted)" }}>
+              Suggest a Filipino dish you would like to see added to FoodFix!
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input
+                className="ff-input"
+                placeholder="Dish name (e.g. Chicken Inasal, Kare-Kare)"
+                value={submitDishName}
+                onChange={(e) => setSubmitDishName(e.target.value)}
+              />
+              <textarea
+                className="ff-textarea"
+                rows={3}
+                placeholder="Optional notes or recipe preference..."
+                value={submitDishNotes}
+                onChange={(e) => setSubmitDishNotes(e.target.value)}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button type="button" className="ff-btn ff-btn-outline" style={{ flex: 1 }} onClick={() => setSubmitModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submittingDish}
+                className="ff-btn ff-btn-primary"
+                style={{ flex: 1 }}
+                onClick={async () => {
+                  if (!submitDishName.trim()) {
+                    toast.error("Please enter a dish name.");
+                    return;
+                  }
+                  setSubmittingDish(true);
+                  try {
+                    await submitDishSuggestionWeb({
+                      name: submitDishName,
+                      description: submitDishNotes,
+                      user_id: profile.id,
+                      user_email: profile.email,
+                      user_name: profile.username,
+                    });
+                    toast.success("Dish suggestion submitted to FoodFix!");
+                    setSubmitModalOpen(false);
+                  } catch (err: any) {
+                    toast.error(err?.message || "Failed to submit dish suggestion");
+                  } finally {
+                    setSubmittingDish(false);
+                  }
+                }}
+              >
+                {submittingDish ? "Submitting..." : "Submit Dish"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ask FOFI about Delivery Modal */}
+      {fofiOpen && (
+        <div
+          className="ff-modal-overlay"
+          onClick={() => {
+            setFofiOpen(false);
+            fofiUnsubRef.current?.();
+            fofiUnsubRef.current = null;
+          }}
+        >
+          <div className="ff-modal" style={{ maxWidth: 480, display: "flex", flexDirection: "column", gap: 12 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Ask FOFI · Delivery Assistant</h3>
+                <div style={{ fontSize: 12, color: "var(--ff-espresso-muted)" }}>
+                  {fofiOrder ? `Tracking Order #${fofiOrder.order_number}` : "No active order"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="ff-icon-btn"
+                onClick={() => {
+                  setFofiOpen(false);
+                  fofiUnsubRef.current?.();
+                  fofiUnsubRef.current = null;
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {["Where is my driver?", "How long until delivery?", "Order status"].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  className="ff-btn ff-btn-soft ff-btn-pill"
+                  style={{ fontSize: 11.5, padding: "5px 11px" }}
+                  onClick={() => answerFofiDelivery(q)}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, padding: "4px 2px" }}>
+              {fofiMessages.map((m, i) => (
+                <div
+                  key={i}
+                  style={{
+                    alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                    background: m.role === "user" ? "#F25C05" : "#FDF5E0",
+                    color: m.role === "user" ? "#fff" : "#2E1A06",
+                    borderRadius: 14,
+                    padding: "9px 12px",
+                    fontSize: 13,
+                    maxWidth: "82%",
+                  }}
+                >
+                  {m.text}
+                </div>
+              ))}
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                answerFofiDelivery(fofiInput);
+              }}
+              style={{ display: "flex", gap: 8 }}
+            >
+              <input
+                className="ff-input"
+                placeholder="Ask FOFI about your delivery..."
+                value={fofiInput}
+                onChange={(e) => setFofiInput(e.target.value)}
+              />
+              <button type="submit" className="ff-btn ff-btn-primary">
+                <Send size={14} />
+              </button>
+            </form>
           </div>
         </div>
       )}

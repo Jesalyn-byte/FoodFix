@@ -591,7 +591,7 @@ export default function AdminOverview({ onNavigate }: Props) {
                 className="ff-btn ff-btn-outline"
                 style={{ justifyContent: "space-between" }}
               >
-                <span>Unread Customer Messages</span>
+                <span>Unread Customer Inquiries</span>
                 <span className="ff-badge" style={{ background: "#EBF5FB", color: "#2980B9" }}>
                   {unreadMessages} unread
                 </span>

@@ -14,7 +14,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { getCurrentUser } from "../lib/firebase";
 import AppLoader from "../components/AppLoader";
-import OrderBreakdown from "../components/OrderBreakdown";
 import { buildDeliveryMapHtml, type DeliveryMapSyncPayload } from "../lib/delivery-map-html";
 import {
   getSettings, onLocationUpdate, onOrderUpdate,
@@ -41,7 +40,6 @@ export default function TrackDeliveryScreen() {
   const [aiThinking, setAiThinking] = useState(false);
   const [customerLoc, setCustomerLoc] = useState<LiveLocation | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
-  const [showReceipt, setShowReceipt] = useState(true);
   const webViewRef = useRef<WebView>(null);
   const webIframeRef = useRef<HTMLIFrameElement | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
@@ -454,35 +452,11 @@ export default function TrackDeliveryScreen() {
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#2E1A06" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Live Tracking</Text>
+        <Text style={styles.headerTitle}>Live Tracking · #{order.order_number}</Text>
         <TouchableOpacity onPress={openExternalMaps} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="map-outline" size={21} color="#F25C05" />
         </TouchableOpacity>
       </View>
-
-      {/* Order Info Bar */}
-      <TouchableOpacity style={styles.orderBar} onPress={() => setShowReceipt((prev) => !prev)} activeOpacity={0.8}>
-        <Ionicons name="receipt-outline" size={15} color="#F25C05" />
-        <Text style={styles.orderBarText} numberOfLines={1}>
-          #{order.order_number} · ₱{(order.total ?? 0).toFixed(2)}
-        </Text>
-        <View style={[styles.statusDot, { backgroundColor: sharingActive ? "#27AE60" : "#F39C12" }]} />
-        <Text style={styles.statusLabel}>{sharingActive ? "Live" : "Waiting"}</Text>
-        <Ionicons name={showReceipt ? "chevron-up" : "chevron-down"} size={15} color="#8C7A6B" />
-      </TouchableOpacity>
-
-      {/* Subtotal / Delivery Fee / Total breakdown (collapsible so map stays spacious) */}
-      {showReceipt && (
-        <OrderBreakdown
-          items={order.items || []}
-          showItems={true}
-          subtotal={order.subtotal}
-          deliveryFee={order.delivery_fee}
-          total={order.total}
-          compact
-          style={{ marginHorizontal: 12, marginTop: 6, marginBottom: 6 }}
-        />
-      )}
 
       {/* Map */}
       <View style={styles.mapContainer}>
@@ -498,7 +472,7 @@ export default function TrackDeliveryScreen() {
           <WebView
             ref={webViewRef}
             originWhitelist={["*"]}
-            source={{ html: initialMapHtml }}
+            source={{ html: initialMapHtml, baseUrl: "https://foodfix-lasangpinoy-2026.web.app" }}
             javaScriptEnabled
             domStorageEnabled
             style={{ flex: 1 }}
@@ -722,10 +696,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9F0DC" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 10, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#E8D8A0" },
   headerTitle: { fontSize: 16, fontWeight: "bold", color: "#2E1A06" },
-  orderBar: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: "#FFF5EE" },
-  orderBarText: { fontSize: 13, fontWeight: "600", color: "#2E1A06", flex: 1 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusLabel: { fontSize: 12, color: "#666" },
   mapContainer: { flex: 1, minHeight: 200, overflow: "hidden" },
   legendBar: {
     flexDirection: "row",

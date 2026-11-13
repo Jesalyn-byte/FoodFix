@@ -10,10 +10,12 @@ import {
   deleteMenuItem,
   formatTimeAgo,
   getInventoryAdjustments,
+  logMenuAdjustmentWeb,
   onMenuItemsUpdate,
   updateMenuItem,
   uploadToCloudinaryWeb,
   type MenuItem,
+  type NormalizedAdjustment,
 } from "../../lib/store-web";
 
 const EMPTY_FORM = {
@@ -48,7 +50,8 @@ export default function AdminMenu() {
   const [adjustReason, setAdjustReason] = useState("restock");
   const [adjustNotes, setAdjustNotes] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<NormalizedAdjustment[]>([]);
+  const [historyFilterItem, setHistoryFilterItem] = useState<string>("");
 
   const [catModalOpen, setCatModalOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
@@ -66,13 +69,21 @@ export default function AdminMenu() {
   }, []);
 
   const allCategoryNames = useMemo(() => {
-    const set = new Set<string>([...MENU_CATEGORIES, ...categories.map((c) => c.name)]);
+    const set = new Set<string>([
+      ...MENU_CATEGORIES,
+      ...categories.map((c) => c.name),
+      ...items.map((i) => i.category).filter(Boolean),
+    ]);
     return Array.from(set);
-  }, [categories]);
+  }, [categories, items]);
 
   const filtered = useMemo(() => {
     return items.filter((i) => {
-      if (activeCat && i.category !== activeCat) return false;
+      if (activeCat === "Made to Order") {
+        if (i.category !== "Made to Order" && !i.is_made_to_order) return false;
+      } else if (activeCat && i.category !== activeCat) {
+        return false;
+      }
       if (search.trim()) {
         const s = search.trim().toLowerCase();
         return i.name.toLowerCase().includes(s) || i.description?.toLowerCase().includes(s);
@@ -113,27 +124,63 @@ export default function AdminMenu() {
     }
     setSaving(true);
     try {
-      const payload: Omit<MenuItem, "id" | "created_at"> = {
+      const isMadeToOrder = Boolean(form.is_made_to_order || form.category === "Made to Order");
+      const nutrients: Record<string, number> = {};
+      if (form.calories !== "" && Number.isFinite(Number(form.calories))) nutrients.calories = Number(form.calories);
+      if (form.protein !== "" && Number.isFinite(Number(form.protein))) nutrients.protein = Number(form.protein);
+      if (form.carbs !== "" && Number.isFinite(Number(form.carbs))) nutrients.carbs = Number(form.carbs);
+      if (form.fat !== "" && Number.isFinite(Number(form.fat))) nutrients.fat = Number(form.fat);
+
+      const payload: Partial<MenuItem> = {
         name: form.name.trim(),
         description: form.description.trim(),
         price: Number(form.price) || 0,
         category: form.category,
         image_url: form.image_url.trim(),
-        stock_quantity: form.is_made_to_order ? 999 : Number(form.stock_quantity) || 0,
+        stock_quantity: isMadeToOrder ? 999 : Number(form.stock_quantity) || 0,
         available: form.available,
-        is_made_to_order: form.is_made_to_order,
-        nutrients: {
-          calories: form.calories ? Number(form.calories) : undefined,
-          protein: form.protein ? Number(form.protein) : undefined,
-          carbs: form.carbs ? Number(form.carbs) : undefined,
-          fat: form.fat ? Number(form.fat) : undefined,
-        },
+        is_made_to_order: isMadeToOrder,
+        ...(Object.keys(nutrients).length > 0 ? { nutrients } : {}),
       };
       if (editing) {
         await updateMenuItem(editing.id, payload);
+        const changes: string[] = [];
+        if (Number(editing.price) !== payload.price) {
+          changes.push(`Price ₱${Number(editing.price).toFixed(2)} -> ₱${Number(payload.price).toFixed(2)}`);
+        }
+        if (Boolean(editing.available) !== Boolean(payload.available)) {
+          changes.push(payload.available ? "Marked Available" : "Marked Sold Out");
+        }
+        if (Boolean(editing.is_made_to_order) !== isMadeToOrder) {
+          changes.push(isMadeToOrder ? "Enabled Made to Order" : "Disabled Made to Order");
+        }
+        const prevStock = Number(editing.stock_quantity ?? 0);
+        const nextStock = Number(payload.stock_quantity ?? 0);
+        if (prevStock !== nextStock || changes.length > 0) {
+          await logMenuAdjustmentWeb({
+            menu_item_id: editing.id,
+            menu_item_name: payload.name || editing.name,
+            delta: nextStock - prevStock,
+            previous_quantity: prevStock,
+            new_quantity: nextStock,
+            reason: prevStock !== nextStock ? "menu_stock_edit" : "menu_edit",
+            notes: changes.join(" · ") || "Menu details updated",
+            staff_name: "Admin Web",
+          });
+        }
         toast.success(`Updated ${payload.name}`);
       } else {
-        await addMenuItem(payload);
+        const created = await addMenuItem(payload as Omit<MenuItem, "id" | "created_at">);
+        await logMenuAdjustmentWeb({
+          menu_item_id: created.id,
+          menu_item_name: payload.name || "New Dish",
+          delta: Number(payload.stock_quantity || 0),
+          previous_quantity: 0,
+          new_quantity: Number(payload.stock_quantity || 0),
+          reason: "menu_added",
+          notes: `Added ₱${Number(payload.price || 0).toFixed(2)}${isMadeToOrder ? " (Made to Order)" : ""}`,
+          staff_name: "Admin Web",
+        });
         toast.success(`Added ${payload.name} to menu`);
       }
       setModalOpen(false);
@@ -179,11 +226,12 @@ export default function AdminMenu() {
               type="button"
               className="ff-btn ff-btn-outline"
               onClick={async () => {
+                setHistoryFilterItem("");
                 setHistory(await getInventoryAdjustments());
                 setHistoryOpen(true);
               }}
             >
-              <History size={15} /> Stock Logs
+              <History size={15} /> Adjustment History
             </button>
             <button type="button" className="ff-btn ff-btn-outline" onClick={() => setCatModalOpen(true)}>
               Categories
@@ -269,6 +317,20 @@ export default function AdminMenu() {
                 >
                   {item.available ? "Available" : "Sold Out"}
                 </span>
+                {(item.is_made_to_order || item.category === "Made to Order") && (
+                  <span
+                    className="ff-badge"
+                    style={{
+                      position: "absolute",
+                      bottom: 10,
+                      left: 10,
+                      background: "#8B4513",
+                      color: "#fff",
+                    }}
+                  >
+                    Made to Order
+                  </span>
+                )}
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -305,7 +367,7 @@ export default function AdminMenu() {
                 >
                   <Edit3 size={14} /> Edit
                 </button>
-                {!item.is_made_to_order && (
+                {!item.is_made_to_order && item.category !== "Made to Order" && (
                   <button
                     type="button"
                     className="ff-btn ff-btn-outline"
@@ -319,6 +381,18 @@ export default function AdminMenu() {
                     <PackagePlus size={14} /> Stock
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="ff-btn ff-btn-outline"
+                  title="View item adjustment history"
+                  onClick={async () => {
+                    setHistoryFilterItem(item.id);
+                    setHistory(await getInventoryAdjustments());
+                    setHistoryOpen(true);
+                  }}
+                >
+                  <History size={14} />
+                </button>
                 <button
                   type="button"
                   className="ff-btn ff-btn-danger-soft"
@@ -366,7 +440,14 @@ export default function AdminMenu() {
                 <select
                   className="ff-select"
                   value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  onChange={(e) => {
+                    const nextCat = e.target.value;
+                    setForm({
+                      ...form,
+                      category: nextCat,
+                      is_made_to_order: nextCat === "Made to Order" ? true : form.is_made_to_order,
+                    });
+                  }}
                 >
                   {allCategoryNames.map((c) => (
                     <option key={c} value={c}>{c}</option>
@@ -505,35 +586,73 @@ export default function AdminMenu() {
         </div>
       )}
 
-      {/* Inventory History Modal */}
+      {/* Inventory & Menu Adjustment History Modal */}
       {historyOpen && (
         <div className="ff-modal-overlay" onClick={() => setHistoryOpen(false)}>
           <div className="ff-modal ff-modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Inventory Adjustment Logs</h3>
-              <button type="button" onClick={() => setHistoryOpen(false)} style={{ border: "none", background: "none" }}><X size={20} /></button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Menu &amp; Stock Adjustment History</h3>
+                <div style={{ fontSize: 12, color: "var(--ff-espresso-muted)" }}>
+                  Tracks restocks, spoilage, price updates, availability changes, and Made to Order toggles
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {historyFilterItem && (
+                  <button
+                    type="button"
+                    className="ff-btn ff-btn-soft"
+                    style={{ fontSize: 12, padding: "5px 10px" }}
+                    onClick={() => setHistoryFilterItem("")}
+                  >
+                    Show All Items
+                  </button>
+                )}
+                <button type="button" className="ff-icon-btn" onClick={() => setHistoryOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             <div className="ff-table-wrap">
               <table className="ff-table">
                 <thead>
                   <tr>
+                    <th>When</th>
                     <th>Dish</th>
                     <th>Change</th>
                     <th>Previous -&gt; New</th>
-                    <th>Reason</th>
+                    <th>Reason / Details</th>
+                    <th>By</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {history.slice(0, 30).map((h) => (
-                    <tr key={h.id}>
-                      <td><strong>{h.menu_item_name}</strong></td>
-                      <td style={{ color: h.delta >= 0 ? "#27AE60" : "#E74C3C", fontWeight: 700 }}>
-                        {h.delta >= 0 ? `+${h.delta}` : h.delta}
+                  {history
+                    .filter((h) => !historyFilterItem || h.menu_item_id === historyFilterItem)
+                    .slice(0, 50)
+                    .map((h) => (
+                      <tr key={h.id}>
+                        <td style={{ whiteSpace: "nowrap", fontSize: 12, color: "var(--ff-espresso-muted)" }}>
+                          {formatTimeAgo(h.created_at) || "Recent"}
+                        </td>
+                        <td><strong>{h.menu_item_name}</strong></td>
+                        <td style={{ color: h.delta > 0 ? "#27AE60" : h.delta < 0 ? "#E74C3C" : "var(--ff-espresso-muted)", fontWeight: 700 }}>
+                          {h.delta > 0 ? `+${h.delta}` : h.delta === 0 ? "Edited" : h.delta}
+                        </td>
+                        <td>{h.previous_quantity} -&gt; {h.new_quantity}</td>
+                        <td>
+                          <span style={{ textTransform: "capitalize", fontWeight: 600 }}>{String(h.reason || "").replace(/_/g, " ")}</span>
+                          {h.notes ? ` · ${h.notes}` : ""}
+                        </td>
+                        <td style={{ fontSize: 12, color: "var(--ff-espresso-muted)" }}>{h.staff_name || "Admin"}</td>
+                      </tr>
+                    ))}
+                  {history.filter((h) => !historyFilterItem || h.menu_item_id === historyFilterItem).length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--ff-gray)" }}>
+                        No adjustment logs recorded yet.
                       </td>
-                      <td>{h.previous_quantity} -&gt; {h.new_quantity}</td>
-                      <td>{h.reason} {h.notes ? `(${h.notes})` : ""}</td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
