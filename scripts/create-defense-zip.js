@@ -42,6 +42,10 @@ const includeFiles = [
   'package.json',
   'package-lock.json',
   'README_DEFENSE_DEMO.md',
+  'setup.bat',
+  'setup.sh',
+  'start-localhost.bat',
+  'start-localhost.sh',
   'run-demo.bat',
   'run-demo.sh',
   'tsconfig.json',
@@ -67,9 +71,9 @@ function copyRecursive(src, dest) {
 }
 
 async function main() {
-  console.log('═'.repeat(60));
-  console.log('📦 Creating One-Time Setup ZIP for Defense Demonstration');
-  console.log('═'.repeat(60));
+  console.log('='.repeat(60));
+  console.log('Creating One-Time Setup ZIP for Defense Demonstration');
+  console.log('='.repeat(60));
 
   // Clean old outputs
   if (fs.existsSync(stagingDir)) {
@@ -89,7 +93,7 @@ async function main() {
     const srcPath = path.join(rootDir, folder);
     if (fs.existsSync(srcPath)) {
       copyRecursive(srcPath, path.join(stagingDir, folder));
-      console.log(`  ✓ Staged folder: ${folder}/`);
+      console.log(`  [OK] Staged folder: ${folder}/`);
     }
   }
 
@@ -99,7 +103,7 @@ async function main() {
     const srcFile = path.join(rootDir, file);
     if (fs.existsSync(srcFile)) {
       fs.copyFileSync(srcFile, path.join(stagingDir, file));
-      console.log(`  ✓ Staged file: ${file}`);
+      console.log(`  [OK] Staged file: ${file}`);
     }
   }
 
@@ -114,14 +118,14 @@ async function main() {
   const stats = fs.statSync(zipPath);
   const sizeMb = (stats.size / (1024 * 1024)).toFixed(2);
 
-  console.log('\n' + '═'.repeat(60));
-  console.log(`🎉 SUCCESS! ZIP Created: ${zipPath}`);
-  console.log(`📊 Size: ${sizeMb} MB`);
-  console.log('═'.repeat(60));
+  console.log('\n' + '='.repeat(60));
+  console.log(`SUCCESS! ZIP Created: ${zipPath}`);
+  console.log(`Size: ${sizeMb} MB`);
+  console.log('='.repeat(60));
 }
 
 main().catch((err) => {
-  console.error('\n❌ Packaging failed:', err);
+  console.error('\n[ERROR] Packaging failed:', err);
   process.exit(1);
 });
 

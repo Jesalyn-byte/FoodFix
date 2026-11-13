@@ -134,9 +134,6 @@ while true; do
   FOODFIX READY - TECHNICAL DEMO & DEBUGGING MENU
   Active Path: $(pwd)
 ======================================================================
-  [1] Start Local Expo Server (Web + Mobile QR Code for Android/iOS)
-  [2] Start Local Web Server Only (Opens http://localhost:8081)
-  [3] Launch Lamion AI Live Technical Debugger (Terminal Chat & Guardrails)
   [1] Launch Production Web Dashboard (Fast http://localhost:3000 - Instant Load)
   [2] Start Expo Metro Dev Server (Web + Mobile QR Code http://localhost:8081)
   [3] Launch Lamion AI Live Technical Debugger (CLI Chat & Guardrails)

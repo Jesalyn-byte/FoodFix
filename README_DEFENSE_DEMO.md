@@ -7,13 +7,13 @@ Welcome to the **FoodFix & Lamion AI** presentation and technical debugging suit
 ## 1-Minute Quick Start (Windows)
 
 1. **Extract this ZIP folder** to any location (e.g. `Desktop` or `Documents`).
-2. **Double-click `run-demo.bat`**.
-   - The script automatically checks Node.js, installs any missing dependencies, resolves directory paths, and opens the interactive menu.
-3. **Press `1` and Enter**:
-   - Launches the **Desktop Web Admin Console** at **`http://localhost:3000`**.
-   - On desktop browsers, the app automatically renders as a full-screen **Web Admin Dashboard** with a fixed left sidebar, 4-column KPI overview, and multi-column operations workspace (while automatically adapting to mobile bottom-tab navigation on phones!).
+2. **One-Time Setup** — Double-click **`setup.bat`** inside the extracted folder.
+   - Automatically verifies/installs Node.js, configures `.env`, installs all root (`node_modules`) and web (`web/node_modules`) dependencies into the extracted folder, and verifies the `dist/` production build.
+3. **Start Localhost** — Double-click **`start-localhost.bat`**.
+   - Starts the web server at **`http://localhost:3000`** and opens it automatically in your browser.
+4. *(Optional)* Double-click **`run-demo.bat`** anytime for the interactive defense debugging menu (Expo QR dev server, AI CLI debugger, re-seeding demo orders, Jest tests, or TypeScript checks).
 
-*(If you are on macOS / Linux, open Terminal in this folder and run `bash run-demo.sh`)*
+*(macOS / Linux: run `bash setup.sh` once, then `bash start-localhost.sh` to start localhost.)*
 
 ---
 
