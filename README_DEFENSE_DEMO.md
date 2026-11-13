@@ -10,8 +10,8 @@ Welcome to the **FoodFix & Lamion AI** presentation and technical debugging suit
 2. **Double-click `run-demo.bat`**.
    - The script automatically checks Node.js, installs any missing dependencies, resolves directory paths, and opens the interactive menu.
 3. **Press `1` and Enter**:
-   - Launches the **Production Web Dashboard** at **`http://localhost:3000`**.
-   - Your browser will automatically open with the **1:1 Mobile Screen Ratio** simulation and top defense control bar!
+   - Launches the **Desktop Web Admin Console** at **`http://localhost:3000`**.
+   - On desktop browsers, the app automatically renders as a full-screen **Web Admin Dashboard** with a fixed left sidebar, 4-column KPI overview, and multi-column operations workspace (while automatically adapting to mobile bottom-tab navigation on phones!).
 
 *(If you are on macOS / Linux, open Terminal in this folder and run `bash run-demo.sh`)*
 
@@ -23,7 +23,7 @@ When you run `run-demo.bat`, you will see:
 
 | Option | What It Does | When to Use During Defense |
 |---|---|---|
-| **`[1]` Production Web Dashboard** | Starts fast local web server on `http://localhost:3000` | **Primary defense presentation tool**. Instant load with 1:1 mobile app ratio. |
+| **`[1]` Production Web Dashboard** | Starts fast local web server on `http://localhost:3000` | **Primary defense presentation tool**. Full-screen Desktop Web Admin Console with sidebar & KPI grid. |
 | **`[2]` Expo Dev Server** | Starts Expo Metro on `http://localhost:8081` | Use if a panelist asks to see the app on a physical Android phone via QR code. |
 | **`[3]` Lamion AI CLI Debugger** | Interactive terminal chat & guardrail tester | **Technical debugging inquiry**. Demonstrates culinary reasoning and prompt injection refusal live. |
 | **`[4]` Re-populate Demo Data** | Seeds fresh orders (#1041-#1045), GCash slips, chat | Run this before your defense or between demo runs to reset all data to a clean state. |
@@ -34,7 +34,7 @@ When you run `run-demo.bat`, you will see:
 
 ## 🔑 Demo Accounts Cheat-Sheet
 
-The top defense bar allows **1-click instant role switching** between accounts without typing passwords. If logging in manually:
+Log in with any of the accounts below (or use the sidebar **Quick View** links once signed in as Admin to jump directly between Customer Storefront and Staff / Rider views):
 
 | Role | Email | Password | Access |
 |---|---|---|---|
@@ -46,8 +46,8 @@ The top defense bar allows **1-click instant role switching** between accounts w
 
 ## 🌟 Key Features to Highlight to the Panel
 
-1. **1:1 Mobile App Ratio Frame**:
-   - Look at the top defense bar: toggle between `📱 1:1 App Ratio` (pixel-perfect mobile phone simulation) and `💻 Wide` desktop mode.
+1. **Responsive Desktop Web Admin Console**:
+   - Fixed left espresso sidebar with all 8 admin modules (`Dashboard`, `Orders`, `Menu & Stock`, `Support Messages`, `Banners`, `Customer Reviews`, `Nutrition Manager`, `Staff & Settings`) plus Quick View role links, 4-column KPI strip, and 2-column operations workspace.
 2. **Real-Time Financial & Order Metrics**:
    - Total sales today, gross revenue, pending orders, and in-flight order tracker.
 3. **1-Click Order Lifecycle Management**:
@@ -59,3 +59,4 @@ The top defense bar allows **1-click instant role switching** between accounts w
      - **Authentic Filipino Culinary Knowledge**: Deep knowledge of 48+ regional dishes, ingredients, and nutrition.
 5. **Real-time GCash Payment Verification & Refund Approvals**:
    - One-tap `[Verify Paid]` for GCash slips and 1-click refund approval/rejection.
+

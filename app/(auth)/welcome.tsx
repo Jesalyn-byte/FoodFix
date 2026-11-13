@@ -209,7 +209,7 @@ export default function WelcomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9F0DC" },
-  scroll: { flexGrow: 1, justifyContent: "center", padding: 24 },
+  scroll: { flexGrow: 1, justifyContent: "center", padding: 24, maxWidth: 480, width: "100%", alignSelf: "center" },
   logoBox: { alignItems: "center", marginBottom: 16 },
   logoImg: {
     width: 110,
