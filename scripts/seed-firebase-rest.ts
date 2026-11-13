@@ -1,7 +1,7 @@
 // Firebase Data Seeding Script using REST API
 // This seeds the initial data to Firestore using REST API (bypasses SDK issues in Node.js)
 
-const PROJECT_ID = 'lasangpinoy-mobile';
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'foodfix-lasangpinoy-2026';
 const DATABASE_ID = 'default';
 const BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents`;
 
@@ -232,7 +232,7 @@ async function seedData() {
     await createDocument('profiles', 'admin_placeholder', adminProfile);
     console.log('   [OK] Admin profile placeholder created');
     console.log('   [WARN]️  You need to create the actual user in Firebase Auth Console:\n');
-    console.log('   1. Go to: https://console.firebase.google.com/project/lasangpinoy-mobile/authentication/users');
+    console.log(`   1. Go to: https://console.firebase.google.com/project/${PROJECT_ID}/authentication/users`);
     console.log('   2. Click "Add user"');
     console.log('   3. Email: <your-admin-email>');
     console.log('   4. Password: <your-admin-password>');

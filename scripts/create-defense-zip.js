@@ -49,7 +49,7 @@ const includeFiles = [
   'run-demo.bat',
   'run-demo.sh',
   'tsconfig.json',
-  'FOODFIX-v4.1.9.apk',
+  'FOODFIX-v4.2.0.apk',
   'logo.jpg',
   'logo.png',
   'CLIENT-DEMO.md',

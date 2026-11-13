@@ -5,6 +5,7 @@ import {
   Flag,
   Home,
   LogOut,
+  MapPin,
   Menu as MenuIcon,
   MessageSquare,
   Minus,
@@ -31,6 +32,7 @@ import {
   type OrderType,
   type PaymentMethod,
 } from "@shared/constants/order";
+import { LiveTrackingModal } from "../../components/LiveTrackingModal";
 import OrderBreakdown from "../../components/OrderBreakdown";
 import {
   FaqSection,
@@ -152,6 +154,7 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
   const [reviewComment, setReviewComment] = useState("");
   const [refundOrder, setRefundOrder] = useState<Order | null>(null);
   const [refundReason, setRefundReason] = useState("");
+  const [trackOrder, setTrackOrder] = useState<Order | null>(null);
 
   // Profile Editor
   const [editName, setEditName] = useState(profile.username || "");
@@ -772,6 +775,16 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
                           </div>
                         </div>
                         <OrderBreakdown showItems items={o.items} subtotal={o.subtotal} deliveryFee={o.delivery_fee} total={o.total} />
+                        {(o.order_type === "delivery_now" || o.order_type === "delivery_later") &&
+                          ["pending", "accepted", "preparing", "out_for_delivery"].includes(o.status) && (
+                            <button
+                              type="button"
+                              className="ff-btn ff-btn-blue"
+                              onClick={() => setTrackOrder(o)}
+                            >
+                              <MapPin size={14} /> Track Live Delivery Map
+                            </button>
+                          )}
                         {o.status === "delivered" && (
                           <div style={{ display: "flex", gap: 8 }}>
                             <button
@@ -1156,6 +1169,14 @@ export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmi
       )}
 
       <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} entries={searchEntries} />
+      {trackOrder && (
+        <LiveTrackingModal
+          order={trackOrder}
+          role="customer"
+          viewerId={profile.id}
+          onClose={() => setTrackOrder(null)}
+        />
+      )}
       <FloatingUtilities
         onOpenContact={() => setTab("chat")}
         onOpenSearch={() => setSearchOpen(true)}

@@ -4,12 +4,12 @@ import { doc, getDoc, getFirestore, setDoc, Timestamp } from 'firebase/firestore
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "",
-  authDomain: "lasangpinoy-mobile.firebaseapp.com",
-  projectId: "lasangpinoy-mobile",
-  storageBucket: "lasangpinoy-mobile.firebasestorage.app",
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "foodfix-lasangpinoy-2026.firebaseapp.com",
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "foodfix-lasangpinoy-2026",
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "foodfix-lasangpinoy-2026.firebasestorage.app",
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "",
-  databaseURL: "https://lasangpinoy-mobile.firebaseio.com"
+  databaseURL: "https://foodfix-lasangpinoy-2026.firebaseio.com"
 };
 
 console.log('[SETUP] Testing Firebase SDK with explicit configuration\n');

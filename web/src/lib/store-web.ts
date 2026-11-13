@@ -56,6 +56,8 @@ export interface Order {
   customer_name: string;
   customer_phone: string;
   customer_address: string;
+  customer_lat?: number;
+  customer_lng?: number;
   order_note?: string;
   items: OrderItem[];
   subtotal: number;
@@ -291,6 +293,8 @@ export async function createOrder(data: {
   customer_name: string;
   customer_phone: string;
   customer_address: string;
+  customer_lat?: number;
+  customer_lng?: number;
   order_note?: string;
   items: OrderItem[];
   subtotal: number;
@@ -590,6 +594,58 @@ export async function addReview(data: Omit<Review, "id" | "created_at">) {
 
 export async function deleteReview(id: string) {
   await deleteDoc(doc(db, "reviews", id));
+}
+
+export interface LiveLocation {
+  order_id: string;
+  user_id: string;
+  role: "customer" | "staff";
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  speed?: number;
+  updated_at?: any;
+}
+
+export function onLocationUpdate(
+  orderId: string,
+  role: "customer" | "staff",
+  cb: (loc: LiveLocation | null) => void,
+) {
+  const ref = doc(db, "locations", `${orderId}_${role}`);
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (!snap.exists()) {
+        cb(null);
+        return;
+      }
+      cb(snap.data() as LiveLocation);
+    },
+    () => cb(null),
+  );
+}
+
+export async function upsertLocationWeb(
+  orderId: string,
+  userId: string,
+  role: "customer" | "staff",
+  coords: { lat: number; lng: number; accuracy?: number; speed?: number },
+) {
+  await setDoc(
+    doc(db, "locations", `${orderId}_${role}`),
+    {
+      order_id: orderId,
+      user_id: userId,
+      role,
+      lat: coords.lat,
+      lng: coords.lng,
+      ...(coords.accuracy != null ? { accuracy: coords.accuracy } : {}),
+      ...(coords.speed != null ? { speed: coords.speed } : {}),
+      updated_at: new Date(),
+    },
+    { merge: true },
+  );
 }
 
 // ==================== SETTINGS & LAMION RAG / LOGS ====================

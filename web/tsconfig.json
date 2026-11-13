@@ -18,5 +18,5 @@
       "@shared/*": ["../*"]
     }
   },
-  "include": ["src", "../constants/order.ts", "../lib/lamion-guardrails.ts"]
+  "include": ["src", "../constants/order.ts", "../lib/lamion-guardrails.ts", "../lib/delivery-map-html.ts"]
 }

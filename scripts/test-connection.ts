@@ -4,9 +4,9 @@ import { addDoc, collection, getDocs, getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "",
-  authDomain: "lasangpinoy-mobile.firebaseapp.com",
-  projectId: "lasangpinoy-mobile",
-  storageBucket: "lasangpinoy-mobile.firebasestorage.app",
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "foodfix-lasangpinoy-2026.firebaseapp.com",
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "foodfix-lasangpinoy-2026",
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "foodfix-lasangpinoy-2026.firebasestorage.app",
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || ""
 };
@@ -41,7 +41,7 @@ async function testConnection() {
     console.error('1. Check that Firestore rules are published in Console');
     console.error('2. Make sure rules allow writes (development mode)');
     console.error('3. Wait a few minutes for changes to propagate');
-    console.error('\nGo to: https://console.firebase.google.com/project/lasangpinoy-mobile/firestore/databases/default/rules');
+    console.error('\nGo to: https://console.firebase.google.com/project/foodfix-lasangpinoy-2026/firestore/databases/default/rules');
   }
 }
 

@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Clock, Search, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, MapPin, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   ORDER_STATUSES,
@@ -7,6 +7,7 @@ import {
   ORDER_TYPE_LABELS,
   type OrderStatus,
 } from "@shared/constants/order";
+import { LiveTrackingModal } from "../../components/LiveTrackingModal";
 import OrderBreakdown from "../../components/OrderBreakdown";
 import { SvgLoader } from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
@@ -41,6 +42,7 @@ export default function AdminOrders({ initialFilter = "all" }: Props) {
   const [rejectReason, setRejectReason] = useState("");
   const [issueOrder, setIssueOrder] = useState<Order | null>(null);
   const [issueReason, setIssueReason] = useState("");
+  const [trackOrder, setTrackOrder] = useState<Order | null>(null);
 
   useEffect(() => {
     if (initialFilter) setFilter(initialFilter);
@@ -267,16 +269,25 @@ export default function AdminOrders({ initialFilter = "all" }: Props) {
                     </button>
                   )}
                   {order.status === "out_for_delivery" && (
-                    <button
-                      type="button"
-                      className="ff-btn ff-btn-outline"
-                      onClick={() => {
-                        setIssueOrder(order);
-                        setIssueReason("");
-                      }}
-                    >
-                      <AlertTriangle size={14} /> Flag Issue
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="ff-btn ff-btn-blue"
+                        onClick={() => setTrackOrder(order)}
+                      >
+                        <MapPin size={14} /> Live Map
+                      </button>
+                      <button
+                        type="button"
+                        className="ff-btn ff-btn-outline"
+                        onClick={() => {
+                          setIssueOrder(order);
+                          setIssueReason("");
+                        }}
+                      >
+                        <AlertTriangle size={14} /> Flag Issue
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -363,6 +374,14 @@ export default function AdminOrders({ initialFilter = "all" }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {trackOrder && (
+        <LiveTrackingModal
+          order={trackOrder}
+          role="admin"
+          onClose={() => setTrackOrder(null)}
+        />
       )}
     </div>
   );

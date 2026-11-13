@@ -1,7 +1,7 @@
 // Complete Firebase Setup using REST API
 // Creates admin user in Firebase Auth and corresponding profile in Firestore
 
-const PROJECT_ID = 'lasangpinoy-mobile';
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'foodfix-lasangpinoy-2026';
 const DATABASE_ID = 'default';
 const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '';
 
@@ -152,7 +152,7 @@ async function setupAdmin() {
     if (error.message.includes('EMAIL_EXISTS') || error.message.includes('already exists')) {
       console.error('\n[TASK] To fix this:');
       console.error('   1. Delete the existing user in Firebase Console:');
-      console.error('      https://console.firebase.google.com/project/lasangpinoy-mobile/authentication/users');
+      console.error(`      https://console.firebase.google.com/project/${PROJECT_ID}/authentication/users`);
       console.error('   2. Run this script again');
       console.error('\n   OR use Firebase CLI:');
       console.error(`   npx firebase-tools auth:export users.json --project ${PROJECT_ID}`);

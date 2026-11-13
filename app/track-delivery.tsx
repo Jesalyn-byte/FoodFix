@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ExpoLocation from "expo-location";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { StatusBar } from "expo-status-bar";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Modal,
   Platform, ScrollView, StyleSheet,
@@ -14,6 +15,7 @@ import { WebView } from "react-native-webview";
 import { getCurrentUser } from "../lib/firebase";
 import AppLoader from "../components/AppLoader";
 import OrderBreakdown from "../components/OrderBreakdown";
+import { buildDeliveryMapHtml, type DeliveryMapSyncPayload } from "../lib/delivery-map-html";
 import {
   getSettings, onLocationUpdate, onOrderUpdate,
   setLocationOptIn, updateOrderStatus, upsertLocation,
@@ -39,6 +41,7 @@ export default function TrackDeliveryScreen() {
   const [aiThinking, setAiThinking] = useState(false);
   const [customerLoc, setCustomerLoc] = useState<LiveLocation | null>(null);
   const [webViewReady, setWebViewReady] = useState(false);
+  const [showReceipt, setShowReceipt] = useState(true);
   const webViewRef = useRef<WebView>(null);
   const webIframeRef = useRef<HTMLIFrameElement | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
@@ -85,16 +88,6 @@ export default function TrackDeliveryScreen() {
     if (!orderId) return;
     const unsub = onLocationUpdate(orderId, "staff", (loc) => {
       setDriverLoc(loc);
-      if (loc) {
-        const msg = JSON.stringify({ type: "driverUpdate", lat: loc.lat, lng: loc.lng });
-        if (Platform.OS === "web" && webIframeRef.current?.contentWindow) {
-          try {
-            webIframeRef.current.contentWindow.postMessage(msg, "*");
-          } catch {}
-        } else if (webViewRef.current) {
-          webViewRef.current.postMessage(msg);
-        }
-      }
     });
     unsubRef.current = unsub;
     return () => unsub?.();
@@ -159,17 +152,57 @@ export default function TrackDeliveryScreen() {
     };
   }, [isCustomer, orderId, user]); // stable
 
-  // Re-send location data when WebView finishes loading (fixes race condition)
-  // Also re-sends whenever driverLoc/customerLoc updates arrive after WebView is already ready
+  // Sync store, destination, and live driver location to WebView / iframe without reloading HTML
   useEffect(() => {
-    if (!webViewReady || !webViewRef.current) return;
-    if (driverLoc) {
-      webViewRef.current.postMessage(JSON.stringify({ type: "driverUpdate", lat: driverLoc.lat, lng: driverLoc.lng }));
+    if (!webViewReady) return;
+    const storeLat = settings?.store_lat ?? storeLatRef.current;
+    const storeLng = settings?.store_lng ?? storeLngRef.current;
+    const custLat = order?.customer_lat ?? customerLoc?.lat ?? storeLat;
+    const custLng = order?.customer_lng ?? customerLoc?.lng ?? storeLng;
+
+    const payload: DeliveryMapSyncPayload = {
+      type: "sync",
+      store: {
+        lat: storeLat,
+        lng: storeLng,
+        name: settings?.store_name || "FOODFIX Store",
+      },
+      customer: {
+        lat: custLat,
+        lng: custLng,
+        address: order?.customer_address || "Delivery Destination",
+      },
+      driver: driverLoc
+        ? {
+            lat: driverLoc.lat,
+            lng: driverLoc.lng,
+            speed: driverLoc.speed,
+            label: isCustomer ? (order?.driver_name || "Your Driver") : "You (Driver)",
+          }
+        : null,
+    };
+
+    const msg = JSON.stringify(payload);
+    if (Platform.OS === "web") {
+      try {
+        webIframeRef.current?.contentWindow?.postMessage(msg, "*");
+      } catch {}
+    } else if (webViewRef.current) {
+      webViewRef.current.postMessage(msg);
     }
-    if (customerLoc) {
-      webViewRef.current.postMessage(JSON.stringify({ type: "customerUpdate", lat: customerLoc.lat, lng: customerLoc.lng }));
-    }
-  }, [webViewReady, driverLoc, customerLoc]);
+  }, [
+    webViewReady,
+    driverLoc,
+    customerLoc,
+    order?.customer_lat,
+    order?.customer_lng,
+    order?.customer_address,
+    order?.driver_name,
+    settings?.store_lat,
+    settings?.store_lng,
+    settings?.store_name,
+    isCustomer,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -355,71 +388,37 @@ export default function TrackDeliveryScreen() {
     }, 700);
   }
 
-  function getMapHtml(
-    customerLat = order?.customer_lat ?? customerLoc?.lat ?? storeLatRef.current,
-    customerLng = order?.customer_lng ?? customerLoc?.lng ?? storeLngRef.current
-  ) {
-    const dLat = driverLoc?.lat ?? storeLatRef.current;
-    const dLng = driverLoc?.lng ?? storeLngRef.current;
-    const centerLat = (customerLat + dLat) / 2;
-    const centerLng = (customerLng + dLng) / 2;
+  const initialMapHtml = useMemo(() => {
+    const custLat = order?.customer_lat ?? customerLoc?.lat ?? storeLatRef.current;
+    const custLng = order?.customer_lng ?? customerLoc?.lng ?? storeLngRef.current;
+    return buildDeliveryMapHtml({
+      storeLat: settings?.store_lat ?? storeLatRef.current,
+      storeLng: settings?.store_lng ?? storeLngRef.current,
+      storeName: settings?.store_name || "FOODFIX Store",
+      customerLat: custLat,
+      customerLng: custLng,
+      customerAddress: order?.customer_address || "Delivery Destination",
+      driverLat: driverLoc?.lat ?? null,
+      driverLng: driverLoc?.lng ?? null,
+      driverLabel: isCustomer ? (order?.driver_name || "Your Driver") : "You (Driver)",
+      isCustomer,
+    });
+    // Memoize on orderId + role + initial coordinate availability so the WebView/iframe never reloads on GPS ticks
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId, isCustomer, Boolean(order), Boolean(settings)]);
 
-    return `<!DOCTYPE html>
-<html><head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>
-html,body,#map{margin:0;padding:0;height:100%;width:100%}
-.legend{position:fixed;bottom:6px;left:6px;z-index:999;background:#fff;padding:4px 8px;
-  border-radius:8px;font-family:sans-serif;font-size:10px;box-shadow:0 1px 4px rgba(0,0,0,.12)}
-</style></head><body>
-<div id="map"></div>
-<div class="legend" id="legend">Loading map...</div>
-<script>
-var map = L.map('map').setView([${centerLat},${centerLng}], 14);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-  attribution:'&copy; OSM contributors', maxZoom:19}).addTo(map);
-
-var storeIcon = L.divIcon({html:'<div style="background:#F25C05;color:#fff;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)">S</div>',className:'',iconSize:[18,18],iconAnchor:[9,9]});
-var custIcon  = L.divIcon({html:'<div style="background:#E74C3C;color:#fff;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)">C</div>',className:'',iconSize:[18,18],iconAnchor:[9,18]});
-var driverIcon= L.divIcon({html:'<div style="background:#3498DB;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)">D</div>',className:'',iconSize:[22,22],iconAnchor:[11,11]});
-
-L.marker([${storeLatRef.current},${storeLngRef.current}],{icon:storeIcon}).addTo(map).bindPopup('FOODFIX Store');
-var custMarker = L.marker([${customerLat},${customerLng}],{icon:custIcon}).addTo(map).bindPopup('Pinned Delivery Location');
-
-var driverMarker = null;
-
-${isCustomer ? `document.getElementById('legend').innerHTML = '<span style="color:#3498DB">&#9679;</span> Driver &bull; <span style="color:#E74C3C">&#9679;</span> Delivery Location &bull; <span style="color:#F25C05">&#9679;</span> Store';` :
-  `document.getElementById('legend').innerHTML = '<span style="color:#E74C3C">&#9679;</span> Delivery Destination &bull; <span style="color:#3498DB">&#9679;</span> You (Driver) &bull; <span style="color:#F25C05">&#9679;</span> Store';`}
-
-document.addEventListener('message', function(e){ handleMsg(e.data); });
-window.addEventListener('message', function(e){ handleMsg(e.data); });
-function fitBoundsIfBoth(){
-  if(driverMarker && custMarker){
-    var group = new L.featureGroup([driverMarker, custMarker]);
-    map.fitBounds(group.getBounds().pad(0.25));
-  }
-}
-function handleMsg(raw){
-  try{
-    var d = JSON.parse(raw);
-    if(d.type === 'driverUpdate'){
-      if(!driverMarker) {
-        driverMarker = L.marker([d.lat,d.lng],{icon:driverIcon}).addTo(map).bindPopup('Driver');
-      } else {
-        driverMarker.setLatLng([d.lat, d.lng]);
-      }
-      fitBoundsIfBoth();
-    }
-  }catch(err){}
-}
-</script></body></html>`;
+  function openExternalMaps() {
+    const dest = getDestCoords();
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lng}`;
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Navigation", "Unable to open Google Maps on this device.");
+    });
   }
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
+        <StatusBar style="dark" />
         <AppLoader />
       </SafeAreaView>
     );
@@ -428,6 +427,7 @@ function handleMsg(raw){
   if (!order) {
     return (
       <SafeAreaView style={styles.container}>
+        <StatusBar style="dark" />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color="#2E1A06" /></TouchableOpacity>
           <Text style={styles.headerTitle}>Live Tracking</Text>
@@ -448,40 +448,48 @@ function handleMsg(raw){
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar style="dark" />
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#2E1A06" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Live Tracking</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity onPress={openExternalMaps} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons name="map-outline" size={21} color="#F25C05" />
+        </TouchableOpacity>
       </View>
 
       {/* Order Info Bar */}
-      <View style={styles.orderBar}>
+      <TouchableOpacity style={styles.orderBar} onPress={() => setShowReceipt((prev) => !prev)} activeOpacity={0.8}>
         <Ionicons name="receipt-outline" size={15} color="#F25C05" />
-        <Text style={styles.orderBarText} numberOfLines={1}>#{order.order_number}</Text>
+        <Text style={styles.orderBarText} numberOfLines={1}>
+          #{order.order_number} · ₱{(order.total ?? 0).toFixed(2)}
+        </Text>
         <View style={[styles.statusDot, { backgroundColor: sharingActive ? "#27AE60" : "#F39C12" }]} />
         <Text style={styles.statusLabel}>{sharingActive ? "Live" : "Waiting"}</Text>
-      </View>
+        <Ionicons name={showReceipt ? "chevron-up" : "chevron-down"} size={15} color="#8C7A6B" />
+      </TouchableOpacity>
 
-      {/* Subtotal / Delivery Fee / Total breakdown */}
-      <OrderBreakdown
-        items={order.items || []}
-        showItems={true}
-        subtotal={order.subtotal}
-        deliveryFee={order.delivery_fee}
-        total={order.total}
-        compact
-        style={{ marginHorizontal: 12, marginTop: 8 }}
-      />
+      {/* Subtotal / Delivery Fee / Total breakdown (collapsible so map stays spacious) */}
+      {showReceipt && (
+        <OrderBreakdown
+          items={order.items || []}
+          showItems={true}
+          subtotal={order.subtotal}
+          deliveryFee={order.delivery_fee}
+          total={order.total}
+          compact
+          style={{ marginHorizontal: 12, marginTop: 6, marginBottom: 6 }}
+        />
+      )}
 
       {/* Map */}
       <View style={styles.mapContainer}>
         {Platform.OS === "web" ? (
           <iframe
             ref={(el) => { (webIframeRef as any).current = el; }}
-            srcDoc={getMapHtml()}
+            srcDoc={initialMapHtml}
             style={{ width: "100%", height: "100%", border: "none" } as any}
             title="Live Delivery Map"
             onLoad={() => setWebViewReady(true)}
@@ -490,13 +498,33 @@ function handleMsg(raw){
           <WebView
             ref={webViewRef}
             originWhitelist={["*"]}
-            source={{ html: getMapHtml() }}
+            source={{ html: initialMapHtml }}
             javaScriptEnabled
             domStorageEnabled
             style={{ flex: 1 }}
             onLoadEnd={() => setWebViewReady(true)}
           />
         )}
+      </View>
+
+      {/* Dedicated Non-Overlapping Legend Strip (fixes mobile bottom-corner overflow) */}
+      <View style={styles.legendBar}>
+        <View style={styles.legendChip}>
+          <View style={[styles.legendDot, { backgroundColor: "#E74C3C" }]} />
+          <Text style={styles.legendText}>{isCustomer ? "Delivery Location" : "Delivery Destination"}</Text>
+        </View>
+        <View style={styles.legendChip}>
+          <View style={[styles.legendDot, { backgroundColor: "#3498DB" }]} />
+          <Text style={styles.legendText}>{isCustomer ? "Driver (Live)" : "You (Driver)"}</Text>
+        </View>
+        <View style={styles.legendChip}>
+          <View style={[styles.legendDot, { backgroundColor: "#F25C05" }]} />
+          <Text style={styles.legendText}>Store</Text>
+        </View>
+        <View style={styles.legendChip}>
+          <View style={styles.legendLine} />
+          <Text style={styles.legendText}>Route</Text>
+        </View>
       </View>
 
       {/* Location sharing status bar — always visible for customer */}
@@ -532,15 +560,19 @@ function handleMsg(raw){
       {(driverLoc || customerLoc) && (
         <View style={styles.etaBar}>
           <Ionicons name="time-outline" size={16} color="#2E1A06" />
-          <Text style={styles.etaText}>{getETA()}</Text>
+          <Text style={styles.etaText} numberOfLines={1}>{getETA()}</Text>
+          <TouchableOpacity style={styles.mapsChipBtn} onPress={openExternalMaps}>
+            <Ionicons name="navigate-outline" size={13} color="#1E8449" />
+            <Text style={styles.mapsChipText}>Maps</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.aiChatBtn} onPress={() => setChatVisible(true)}>
             <Text style={styles.aiChatBtnText}>Ask Lamion</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* AI floating button — always visible when not in chat */}
-      {!chatVisible && (
+      {/* AI floating button — shown when ETA bar is hidden and chat is closed */}
+      {!chatVisible && !(driverLoc || customerLoc) && (
         <TouchableOpacity style={styles.aiFloatingBtn} onPress={() => setChatVisible(true)}>
           <Ionicons name="chatbubble-ellipses" size={22} color="#F25C05" />
         </TouchableOpacity>
@@ -694,7 +726,23 @@ const styles = StyleSheet.create({
   orderBarText: { fontSize: 13, fontWeight: "600", color: "#2E1A06", flex: 1 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusLabel: { fontSize: 12, color: "#666" },
-  mapContainer: { flex: 1 },
+  mapContainer: { flex: 1, minHeight: 200, overflow: "hidden" },
+  legendBar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#FFFDF7",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#E8D8A0",
+  },
+  legendChip: { flexDirection: "row", alignItems: "center", gap: 5 },
+  legendDot: { width: 9, height: 9, borderRadius: 5 },
+  legendLine: { width: 14, height: 3, borderRadius: 2, backgroundColor: "#F25C05" },
+  legendText: { fontSize: 11, fontWeight: "600", color: "#5E4A39" },
   permissionBanner: {
     flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#fff",
     paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: "#E8D8A0",
@@ -703,7 +751,9 @@ const styles = StyleSheet.create({
   allowBtn: { backgroundColor: "#F25C05", paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16 },
   allowBtnText: { color: "#fff", fontWeight: "bold", fontSize: 12 },
   etaBar: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#E8F8F0", paddingHorizontal: 12, paddingVertical: 8 },
-  etaText: { fontSize: 13, fontWeight: "600", color: "#2E1A06" },
+  etaText: { fontSize: 13, fontWeight: "600", color: "#2E1A06", flex: 1 },
+  mapsChipBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#D4EFDF", paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12 },
+  mapsChipText: { fontSize: 11.5, fontWeight: "700", color: "#1E8449" },
   waitingBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFF9E6", paddingHorizontal: 12, paddingVertical: 8 },
   waitingText: { fontSize: 12, color: "#B07820" },
   riderInfoBar: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EBF5FB", paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#D6EAF8" },

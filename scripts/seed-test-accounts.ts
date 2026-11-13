@@ -1,6 +1,6 @@
 // Script to seed test accounts in Firebase Auth and Firestore
-const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyAZ36rq3scKZDT5SsETJ_SYIOEB9Gcbkyk';
-const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'lasangpinoy-mobile';
+const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '';
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'foodfix-lasangpinoy-2026';
 const FIRESTORE_BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/default/documents`;
 const AUTH_SIGNUP_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`;
 const AUTH_SIGNIN_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`;

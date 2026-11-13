@@ -1,6 +1,6 @@
 // Test Firestore using REST API directly
 async function testFirestoreREST() {
-  const projectId = 'lasangpinoy-mobile';
+  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'foodfix-lasangpinoy-2026';
   const databaseId = 'default';
   const collectionName = 'test_connection';
   const documentId = 'rest_api_test';

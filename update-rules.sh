@@ -12,7 +12,7 @@ TOKEN=$(npx firebase-tools login:ci --no-localhost 2>&1 | grep -oP '(?<=token: )
 if [ -z "$TOKEN" ]; then
   echo "Unable to get Firebase token. Please set rules manually in Console."
   echo ""
-  echo "Go to: https://console.firebase.google.com/project/lasangpinoy-mobile/firestore/databases/default/rules"
+  echo "Go to: https://console.firebase.google.com/project/foodfix-lasangpinoy-2026/firestore/databases/default/rules"
   echo ""
   echo "And paste these rules:"
   cat firestore.rules

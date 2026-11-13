@@ -486,7 +486,7 @@
     "created": "2026-03-27",
     "updated": "2026-04-17",
     "version": "1.2.0",
-    "projectId": "lasangpinoy-mobile",
+    "projectId": "foodfix-lasangpinoy-2026",
     "releaseNotes": [
       "Removed staff attendance feature and collection dependencies from the app",
       "Removed customer ingredients browsing feature from profile explore actions"

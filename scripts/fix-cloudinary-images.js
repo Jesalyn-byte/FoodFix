@@ -15,8 +15,9 @@
 const CLOUD_NAME = "dafcyj6fh";
 const UPLOAD_PRESET = "lasangpinoy_unsigned";
 const FIREBASE_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "";
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "foodfix-lasangpinoy-2026";
 const FIRESTORE_URL =
-  "https://firestore.googleapis.com/v1/projects/lasangpinoy-mobile/databases/default/documents";
+  `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/default/documents`;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 const ADMIN_PASS = process.env.ADMIN_PASSWORD || "";
 

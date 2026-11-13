@@ -1,10 +1,11 @@
-import { CheckCircle2, ChefHat, Clock, ExternalLink, LogOut, Menu as MenuIcon, Search, Store, Truck, User } from "lucide-react";
+import { CheckCircle2, ChefHat, Clock, ExternalLink, LogOut, MapPin, Menu as MenuIcon, Search, Store, Truck, User } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   ORDER_STATUS_COLORS,
   ORDER_STATUS_LABELS,
   ORDER_TYPE_LABELS,
 } from "@shared/constants/order";
+import { LiveTrackingModal } from "../../components/LiveTrackingModal";
 import OrderBreakdown from "../../components/OrderBreakdown";
 import {
   FloatingUtilities,
@@ -40,6 +41,7 @@ export default function StaffDashboard({
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [trackOrder, setTrackOrder] = useState<Order | null>(null);
 
   useEffect(() => {
     const unsub = onAllOrdersUpdate((data) => {
@@ -279,17 +281,27 @@ export default function StaffDashboard({
                             </button>
                           )}
                           {o.status === "out_for_delivery" && (
-                            <button
-                              type="button"
-                              className="ff-btn ff-btn-green"
-                              style={{ flex: 1 }}
-                              onClick={async () => {
-                                await updateOrderStatus(o.id, "delivered");
-                                toast.success(`Order #${o.order_number} marked delivered!`);
-                              }}
-                            >
-                              <CheckCircle2 size={15} /> Mark Delivered
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="ff-btn ff-btn-blue"
+                                style={{ flex: 1 }}
+                                onClick={() => setTrackOrder(o)}
+                              >
+                                <MapPin size={15} /> Live Map
+                              </button>
+                              <button
+                                type="button"
+                                className="ff-btn ff-btn-green"
+                                style={{ flex: 1 }}
+                                onClick={async () => {
+                                  await updateOrderStatus(o.id, "delivered");
+                                  toast.success(`Order #${o.order_number} marked delivered!`);
+                                }}
+                              >
+                                <CheckCircle2 size={15} /> Mark Delivered
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -314,6 +326,14 @@ export default function StaffDashboard({
 
       <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} entries={searchEntries} />
       <FloatingUtilities onOpenSearch={() => setSearchOpen(true)} />
+      {trackOrder && (
+        <LiveTrackingModal
+          order={trackOrder}
+          role="staff"
+          viewerId={profile.id}
+          onClose={() => setTrackOrder(null)}
+        />
+      )}
     </div>
   );
 }

@@ -265,7 +265,7 @@ export default function AdminDashboard() {
       const latency = Date.now() - start;
       setAiResponse(reply);
       setAiTelemetry({
-        model: "NVIDIA NIM / Llama-3.1-70B",
+        model: "NVIDIA NIM / Nemotron 3.5",
         latencyMs: latency,
         guardrail: reply.includes("exclusively trained")
           ? "DOMAIN_RESTRICTED (BLOCKED)"
@@ -450,7 +450,7 @@ export default function AdminDashboard() {
                 <View style={styles.aiMetricItem}>
                   <Text style={styles.aiMetricLbl}>Primary Engine</Text>
                   <Text style={styles.aiMetricVal} numberOfLines={1}>
-                    NVIDIA NIM 70B
+                    Nemotron 3.5 AI
                   </Text>
                 </View>
                 <View style={styles.aiMetricItem}>

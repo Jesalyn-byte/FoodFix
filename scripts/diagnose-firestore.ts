@@ -67,7 +67,7 @@ async function diagnose() {
     } else if (error.message.includes('NOT_FOUND') || error.code === 5) {
       console.error('   • Database may not be fully initialized');
       console.error('   • Try creating a collection manually in Firebase Console');
-      console.error('   • Go to: https://console.firebase.google.com/project/lasangpinoy-mobile/firestore');
+      console.error('   • Go to: https://console.firebase.google.com/project/foodfix-lasangpinoy-2026/firestore');
       console.error('   • Click "Start collection" and create any test collection');
       console.error('   • Wait 2-3 minutes and try again');
     } else if (error.message.includes('RESOURCE_EXHAUSTED')) {

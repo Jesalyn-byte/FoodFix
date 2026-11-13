@@ -85,27 +85,34 @@ async function callProviderChat(messages: any[], maxTokens = 800): Promise<{ rep
 
   // 1) Localhost proxy endpoint -> NVIDIA NIM (zero CORS issues in Vite dev & serve-web.js)
   if (nimKey && isLocal) {
-    try {
-      const res = await fetch("/api/lamion-nim/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${nimKey}`,
-        },
-        body: JSON.stringify({
-          model: "meta/llama-3.1-70b-instruct",
-          messages,
-          max_tokens: maxTokens,
-          temperature: 0.5,
-        }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const text = json?.choices?.[0]?.message?.content;
-        if (text) return { reply: text, model: "NVIDIA NIM / Llama-3.1-70B" };
+    const nimCandidates = [
+      { id: "nvidia/nemotron-3.5-bolt-e4b", tokens: maxTokens, label: "NVIDIA NIM / Nemotron 3.5 Bolt" },
+      { id: "nvidia/nemotron-3.5-super-vl-120b-a12b", tokens: Math.max(maxTokens, 1400), label: "NVIDIA NIM / Nemotron 3.5 Super 120B" },
+    ];
+    for (const candidate of nimCandidates) {
+      try {
+        const res = await fetch("/api/lamion-nim/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${nimKey}`,
+          },
+          body: JSON.stringify({
+            model: candidate.id,
+            messages,
+            max_tokens: candidate.tokens,
+            temperature: 0.4,
+          }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const msg = json?.choices?.[0]?.message;
+          const text = msg?.content?.trim() || msg?.reasoning_content?.trim();
+          if (text) return { reply: text, model: candidate.label };
+        }
+      } catch {
+        // Try next candidate
       }
-    } catch {
-      // Fall through to browser-CORS-friendly providers
     }
   }
 
@@ -240,17 +247,61 @@ export async function analyzeImageWithLamionWeb(
   base64DataUrl: string,
   mode: "dish" | "ingredients",
 ): Promise<any> {
+  const nimKey = import.meta.env.EXPO_PUBLIC_LAMION_NIM_API_KEY;
   const geminiKey =
     import.meta.env.EXPO_PUBLIC_LAMION_VISION_API_KEY ||
     import.meta.env.EXPO_PUBLIC_GEMINI_API_KEY;
-  if (!geminiKey) {
-    throw new Error("Lamion AI Vision API key not configured.");
-  }
+  const isLocal =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+  const normalizedUrl = base64DataUrl.startsWith("data:")
+    ? base64DataUrl
+    : `data:image/jpeg;base64,${base64DataUrl}`;
   const cleanBase64 = base64DataUrl.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
   const prompt =
     mode === "dish"
       ? `Identify this dish in strict JSON: {"type":"dish","dishName":"","isFilipino":true,"confidence":"high","description":"","ingredients":[],"funFact":"","servingSize":"","cookingTips":"","nutrition":{"calories":"","protein":"","carbs":"","fat":"","fiber":"","sodium":""}}`
       : `Identify ingredients in this image and suggest 2-3 Filipino recipes in strict JSON: {"type":"ingredients","ingredients":[],"suggestedRecipes":[{"name":"","description":"","mainIngredients":[],"nutrition":{"calories":"","protein":"","carbs":"","fat":""}}]}`;
+
+  if (nimKey && isLocal) {
+    try {
+      const res = await fetch("/api/lamion-nim/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${nimKey}`,
+        },
+        body: JSON.stringify({
+          model: "nvidia/nemotron-3.5-super-vl-120b-a12b",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: normalizedUrl } },
+              ],
+            },
+          ],
+          max_tokens: 1800,
+          temperature: 0.2,
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const raw = json?.choices?.[0]?.message?.content || "";
+        const cleaned = raw.replace(/```json\n?/gi, "").replace(/```/g, "").trim();
+        const match = cleaned.match(/\{[\s\S]*\}/);
+        if (match || cleaned) return JSON.parse(match ? match[0] : cleaned);
+      }
+    } catch {
+      // Fall through to Gemini if configured
+    }
+  }
+
+  if (!geminiKey) {
+    throw new Error("Lamion AI Vision API key not configured.");
+  }
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,

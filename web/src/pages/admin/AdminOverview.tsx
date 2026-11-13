@@ -436,7 +436,7 @@ export default function AdminOverview({ onNavigate }: Props) {
             <div className="ff-grid-3" style={{ gap: 8, marginBottom: 12 }}>
               <div style={{ background: "#FDF9F2", borderRadius: 12, padding: 10, border: "1px solid #F0E4CE" }}>
                 <div style={{ fontSize: 10.5, color: "#8C7A6B", fontWeight: 700 }}>ENGINE</div>
-                <div style={{ fontSize: 12, fontWeight: 800, marginTop: 2 }}>NVIDIA NIM 70B</div>
+                <div style={{ fontSize: 12, fontWeight: 800, marginTop: 2 }}>Nemotron 3.5 AI</div>
               </div>
               <div style={{ background: "#FDF9F2", borderRadius: 12, padding: 10, border: "1px solid #F0E4CE" }}>
                 <div style={{ fontSize: 10.5, color: "#8C7A6B", fontWeight: 700 }}>GUARDRAIL</div>

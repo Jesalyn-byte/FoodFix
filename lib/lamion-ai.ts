@@ -158,24 +158,25 @@ const LAMION_ROUTER_MODEL_MAP: Record<string, string> = {
 };
 
 const LAMION_NIM_MODEL_MAP: Record<string, string> = {
-  "lamion-vision":               "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-vision-large":         "meta/llama-3.2-90b-vision-instruct",
+  "lamion-vision":               "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "lamion-vision-large":         "nvidia/nemotron-3.5-super-vl-120b-a12b",
   "lamion-vision-max":           "nvidia/nemotron-3.5-super-vl-120b-a12b",
-  "lamion-vision-max-latest":    "deepseek-ai/deepseek-v4.1-flash",
-  "meta/llama-3.2-11b-vision-instruct": "deepseek-ai/deepseek-v4.1-flash",
+  "lamion-vision-max-latest":    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "meta/llama-3.2-11b-vision-instruct": "nvidia/nemotron-3.5-super-vl-120b-a12b",
   "meta/llama-3.2-90b-vision-instruct": "meta/llama-3.2-90b-vision-instruct",
   "deepseek-ai/deepseek-v4.1-flash":    "deepseek-ai/deepseek-v4.1-flash",
   "nvidia/nemotron-3.5-super-vl-120b-a12b": "nvidia/nemotron-3.5-super-vl-120b-a12b",
-  "lamion-default":              "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-large":                "meta/llama-3.2-90b-vision-instruct",
-  "lamion-chat":                 "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-chat-latest":          "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-chat-plus":            "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-chat-max":             "meta/llama-3.2-90b-vision-instruct",
-  "lamion-chat-free":            "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-vl-flash":             "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-vl-plus":              "deepseek-ai/deepseek-v4.1-flash",
-  "lamion-vl-plus-latest":        "deepseek-ai/deepseek-v4.1-flash",
+  "nvidia/nemotron-3.5-bolt-e4b":           "nvidia/nemotron-3.5-bolt-e4b",
+  "lamion-default":              "nvidia/nemotron-3.5-bolt-e4b",
+  "lamion-large":                "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "lamion-chat":                 "nvidia/nemotron-3.5-bolt-e4b",
+  "lamion-chat-latest":          "nvidia/nemotron-3.5-bolt-e4b",
+  "lamion-chat-plus":            "nvidia/nemotron-3.5-bolt-e4b",
+  "lamion-chat-max":             "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "lamion-chat-free":            "nvidia/nemotron-3.5-bolt-e4b",
+  "lamion-vl-flash":             "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "lamion-vl-plus":              "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "lamion-vl-plus-latest":       "nvidia/nemotron-3.5-super-vl-120b-a12b",
   "lamion-nemotron-vl-free":     "nvidia/nemotron-3.5-super-vl-120b-a12b",
 };
 
@@ -671,15 +672,15 @@ export async function analyzeImageWithLamionAI(
     ];
 
     const visionModels = [
+      "lamion-vision-max",
       "lamion-vision",
       "lamion-vision-large",
-      "lamion-vision-max-latest",
     ];
 
     for (const model of visionModels) {
       try {
         log.debug(`Trying Lamion AI vision model: ${model}`);
-        content = await callLamionAPI(model, messages, 1200, "vision", 12000);
+        content = await callLamionAPI(model, messages, 1800, "vision", 20000);
         usedModel = model;
         log.info(`Lamion AI vision succeeded with: ${model}`);
         break;
@@ -794,11 +795,11 @@ export async function chatWithLamionAI(
 
   const modelsToTry = [
     "lamion-default",
-    "meta/llama-3.2-11b-vision-instruct",
     "lamion-large",
-    "meta/llama-3.2-90b-vision-instruct",
     "lamion-chat-latest",
     "lamion-chat",
+    "meta/llama-3.2-11b-vision-instruct",
+    "meta/llama-3.2-90b-vision-instruct",
   ];
   let lastError: any;
   let usedModel = "none";

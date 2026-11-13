@@ -5,8 +5,9 @@
  */
 
 const FIREBASE_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "";
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "foodfix-lasangpinoy-2026";
 const FIRESTORE_URL =
-  "https://firestore.googleapis.com/v1/projects/lasangpinoy-mobile/databases/default/documents";
+  `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/default/documents`;
 
 // Mapping: recipe document ID → new working image URL (Wikimedia Commons via Wikipedia API)
 const IMAGE_FIXES = {
