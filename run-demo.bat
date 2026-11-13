@@ -229,9 +229,9 @@ if "%CHOICE%"=="" set "CHOICE=1"
 
 if "%CHOICE%"=="1" (
     echo.
-    echo Launching Production Web Dashboard on http://localhost:3000...
+    echo Launching React.js Web Dashboard on http://localhost:3000...
     start http://localhost:3000
-    call npx serve dist -l 3000
+    call node scripts\serve-web.js
     goto :menu
 )
 if "%CHOICE%"=="2" (

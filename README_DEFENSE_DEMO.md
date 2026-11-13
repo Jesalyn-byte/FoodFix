@@ -46,8 +46,9 @@ Log in with any of the accounts below (or use the sidebar **Quick View** links o
 
 ## 🌟 Key Features to Highlight to the Panel
 
-1. **Responsive Desktop Web Admin Console**:
-   - Fixed left espresso sidebar with all 8 admin modules (`Dashboard`, `Orders`, `Menu & Stock`, `Support Messages`, `Banners`, `Customer Reviews`, `Nutrition Manager`, `Staff & Settings`) plus Quick View role links, 4-column KPI strip, and 2-column operations workspace.
+1. **Responsive React.js Web Dashboard (Same UI & Features as the Mobile App)**:
+   - Built with React.js + Vite in `web/` matching FoodFix's warm cream `#F9F0DC`, orange `#F25C05`, and espresso `#2E1A06` UI design.
+   - Includes Admin Web Console (Dashboard, Orders, Menu & Stock, Support Messages, Banners, Reviews, Lamion AI & Nutrition, Users & Store Settings), Staff/Rider Queue, and Customer Storefront (Home, Menu, Cart & Checkout, My Orders, Lamion AI Chat, Dish Scanner, Support Chat, Profile).
 2. **Real-Time Financial & Order Metrics**:
    - Total sales today, gross revenue, pending orders, and in-flight order tracker.
 3. **1-Click Order Lifecycle Management**:

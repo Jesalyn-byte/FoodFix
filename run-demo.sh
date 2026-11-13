@@ -149,7 +149,7 @@ EOF
     read -r -p "Select an option [1-6, or 0 to exit] (default=1): " CHOICE
     CHOICE="${CHOICE:-1}"
     case "$CHOICE" in
-        1) npx serve dist -l 3000 ;;
+        1) node ./scripts/serve-web.js ;;
         2) npx expo start -c ;;
         3) node scripts/debug-lamion-demo.js ;;
         4) node scripts/seed-defense-data.js ;;

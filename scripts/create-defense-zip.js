@@ -24,6 +24,7 @@ const includeFolders = [
   'plugins',
   'public',
   'scripts',
+  'web',
   '__mocks__',
   '__tests__',
 ];
@@ -52,6 +53,8 @@ const includeFiles = [
 ];
 
 function copyRecursive(src, dest) {
+  const base = path.basename(src);
+  if (base === 'node_modules' || base === '.git') return;
   const stat = fs.statSync(src);
   if (stat.isDirectory()) {
     if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
