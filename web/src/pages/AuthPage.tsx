@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import {
-  CodeSnippetBox,
   FaqSection,
   FloatingUtilities,
   NewsletterSignup,
@@ -470,7 +469,7 @@ export default function AuthPage({
         </div>
       </div>
 
-        {/* Newsletter & FAQ & CLI Developer Snippet */}
+        {/* Newsletter & FAQ */}
         <div
           id="foodfix-faq"
           style={{
@@ -481,13 +480,7 @@ export default function AuthPage({
           }}
         >
           <FaqSection />
-          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            <NewsletterSignup />
-            <CodeSnippetBox
-              title="One-Command Defense Localhost Runner"
-              code={`npm install --prefix web && npm run build:pwa\nnode scripts/serve-web.js\n# Opens http://localhost:3000 with 1:1 Firestore Sync`}
-            />
-          </div>
+          <NewsletterSignup />
         </div>
 
         {/* Footer with UTM Outbound Links & 404 Route Preview */}
