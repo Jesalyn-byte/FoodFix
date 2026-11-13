@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Search, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   ORDER_STATUSES,
@@ -8,6 +8,7 @@ import {
   type OrderStatus,
 } from "@shared/constants/order";
 import OrderBreakdown from "../../components/OrderBreakdown";
+import { SvgLoader } from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
 import {
   formatTimeAgo,
@@ -139,9 +140,9 @@ export default function AdminOrders({ initialFilter = "all" }: Props) {
 
       {/* Orders Grid */}
       {loading ? (
-        <div className="ff-card" style={{ textAlign: "center", padding: 40 }}>Loading orders...</div>
+        <div className="ff-card"><SvgLoader text="Loading real-time orders..." /></div>
       ) : filtered.length === 0 ? (
-        <div className="ff-card" style={{ textAlign: "center", padding: 48, color: "#8C7A6B" }}>
+        <div className="ff-card" style={{ textAlign: "center", padding: 48, color: "var(--ff-gray)" }}>
           No orders match this filter.
         </div>
       ) : (
@@ -152,14 +153,14 @@ export default function AdminOrders({ initialFilter = "all" }: Props) {
             return (
               <div
                 key={order.id}
-                className="ff-card"
+                className="ff-card ff-card-hover"
                 style={{ borderTop: `4px solid ${color}`, display: "flex", flexDirection: "column", gap: 12 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                   <div>
                     <div style={{ fontSize: 16.5, fontWeight: 800 }}>Order #{order.order_number}</div>
-                    <div style={{ fontSize: 12, color: "#8C7A6B", marginTop: 2 }}>
-                      {formatTimeAgo(order.created_at)} · {ORDER_TYPE_LABELS[order.order_type] || order.order_type}
+                    <div className="ff-timestamp" style={{ marginTop: 2 }}>
+                      <Clock size={11} /> Updated {formatTimeAgo(order.updated_at || order.created_at)} · {ORDER_TYPE_LABELS[order.order_type] || order.order_type}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -366,3 +367,4 @@ export default function AdminOrders({ initialFilter = "all" }: Props) {
     </div>
   );
 }
+

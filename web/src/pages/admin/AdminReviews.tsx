@@ -1,11 +1,14 @@
-import { Star, Trash2 } from "lucide-react";
+import { Clock, Star, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import ConfirmModal from "../../components/ConfirmModal";
+import { SvgLoader } from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
 import { deleteReview, formatTimeAgo, getReviews, type Review } from "../../lib/store-web";
 
 export default function AdminReviews() {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<Review | null>(null);
 
   async function load() {
     setLoading(true);
@@ -30,7 +33,7 @@ export default function AdminReviews() {
       <div className="ff-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <h3 style={{ margin: 0 }}>Customer Reviews ({reviews.length})</h3>
-          <div style={{ fontSize: 12.5, color: "#8C7A6B" }}>
+          <div style={{ fontSize: 12.5, color: "var(--ff-gray)" }}>
             Verified order ratings submitted across web &amp; mobile
           </div>
         </div>
@@ -40,20 +43,20 @@ export default function AdminReviews() {
       </div>
 
       {loading ? (
-        <div className="ff-card" style={{ textAlign: "center", padding: 40 }}>Loading reviews...</div>
+        <div className="ff-card"><SvgLoader text="Loading customer reviews..." /></div>
       ) : reviews.length === 0 ? (
-        <div className="ff-card" style={{ textAlign: "center", padding: 40, color: "#8C7A6B" }}>
+        <div className="ff-card" style={{ textAlign: "center", padding: 40, color: "var(--ff-gray)" }}>
           No customer reviews submitted yet.
         </div>
       ) : (
         <div className="ff-grid-2">
           {reviews.map((r) => (
-            <div key={r.id} className="ff-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div key={r.id} className="ff-card ff-card-hover" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
                   <strong style={{ fontSize: 15 }}>{r.menu_item_name}</strong>
-                  <div style={{ fontSize: 12, color: "#8C7A6B" }}>
-                    by {r.username} · {formatTimeAgo(r.created_at)}
+                  <div className="ff-timestamp">
+                    <Clock size={11} /> by {r.username} · Updated {formatTimeAgo((r as any).updated_at || r.created_at)}
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
@@ -68,17 +71,13 @@ export default function AdminReviews() {
                 </div>
               </div>
 
-              <p style={{ margin: 0, fontSize: 13.5, color: "#2E1A06", lineHeight: 1.5 }}>{r.comment}</p>
+              <p style={{ margin: 0, fontSize: 13.5, color: "var(--ff-espresso)", lineHeight: 1.5 }}>{r.comment}</p>
 
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button
                   type="button"
                   className="ff-btn ff-btn-danger-soft"
-                  onClick={async () => {
-                    await deleteReview(r.id);
-                    toast.info("Review deleted");
-                    setReviews((prev) => prev.filter((x) => x.id !== r.id));
-                  }}
+                  onClick={() => setPendingDelete(r)}
                 >
                   <Trash2 size={14} /> Remove
                 </button>
@@ -87,6 +86,22 @@ export default function AdminReviews() {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="Remove Customer Review?"
+        description={`Permanently delete ${pendingDelete?.username || "this customer"}'s review of "${pendingDelete?.menu_item_name || ""}"?`}
+        confirmLabel="Remove Review"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          await deleteReview(pendingDelete.id);
+          toast.info("Review deleted");
+          setReviews((prev) => prev.filter((x) => x.id !== pendingDelete.id));
+          setPendingDelete(null);
+        }}
+      />
     </div>
   );
 }
+

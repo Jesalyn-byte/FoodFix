@@ -1,6 +1,8 @@
-import { Save, Shield, Trash2, Upload, UserPlus, Users, X } from "lucide-react";
+import { Eye, EyeOff, Save, Shield, Trash2, Upload, UserPlus, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { USER_ROLES, USER_ROLE_LABELS } from "@shared/constants/order";
+import ConfirmModal from "../../components/ConfirmModal";
+import { SvgLoader } from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
 import {
   createStaffAccount,
@@ -26,7 +28,9 @@ export default function AdminSettingsUsers() {
 
   const [staffModal, setStaffModal] = useState(false);
   const [staffForm, setStaffForm] = useState({ name: "", email: "", password: "", phone: "" });
+  const [staffPassVisible, setStaffPassVisible] = useState(false);
   const [creatingStaff, setCreatingStaff] = useState(false);
+  const [pendingDeleteUser, setPendingDeleteUser] = useState<Profile | null>(null);
 
   const [editUser, setEditUser] = useState<Profile | null>(null);
   const [editForm, setEditForm] = useState({ username: "", phone: "", address: "", role: "customer" as Profile["role"] });
@@ -73,7 +77,7 @@ export default function AdminSettingsUsers() {
   }
 
   if (loading) {
-    return <div className="ff-card" style={{ textAlign: "center", padding: 40 }}>Loading settings &amp; users...</div>;
+    return <div className="ff-card"><SvgLoader text="Loading settings & users..." /></div>;
   }
 
   return (
@@ -210,13 +214,7 @@ export default function AdminSettingsUsers() {
                           type="button"
                           className="ff-btn ff-btn-danger-soft"
                           style={{ padding: "5px 9px" }}
-                          onClick={async () => {
-                            if (window.confirm(`Delete user ${u.email}?`)) {
-                              await deleteUser(u.id);
-                              setUsers((prev) => prev.filter((x) => x.id !== u.id));
-                              toast.info("User removed");
-                            }
-                          }}
+                          onClick={() => setPendingDeleteUser(u)}
                         >
                           <Trash2 size={13} />
                         </button>
@@ -241,7 +239,24 @@ export default function AdminSettingsUsers() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <input className="ff-input" placeholder="Full Name" value={staffForm.name} onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })} />
               <input className="ff-input" placeholder="Email" value={staffForm.email} onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })} />
-              <input type="password" className="ff-input" placeholder="Password (min 6 chars)" value={staffForm.password} onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })} />
+              <div style={{ position: "relative" }}>
+                <input
+                  type={staffPassVisible ? "text" : "password"}
+                  className="ff-input"
+                  style={{ paddingRight: 40 }}
+                  placeholder="Password (min 6 chars)"
+                  value={staffForm.password}
+                  onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setStaffPassVisible((v) => !v)}
+                  style={{ position: "absolute", right: 10, top: 10, border: "none", background: "transparent", color: "var(--ff-gray)" }}
+                  aria-label="Toggle staff password visibility"
+                >
+                  {staffPassVisible ? <Eye size={17} /> : <EyeOff size={17} />}
+                </button>
+              </div>
               <input className="ff-input" placeholder="Phone Number" value={staffForm.phone} onChange={(e) => setStaffForm({ ...staffForm, phone: e.target.value })} />
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -315,6 +330,21 @@ export default function AdminSettingsUsers() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        open={!!pendingDeleteUser}
+        title="Delete User Account?"
+        description={`Remove profile for ${pendingDeleteUser?.email || ""}? This action cannot be undone.`}
+        confirmLabel="Delete User"
+        onCancel={() => setPendingDeleteUser(null)}
+        onConfirm={async () => {
+          if (!pendingDeleteUser) return;
+          await deleteUser(pendingDeleteUser.id);
+          setUsers((prev) => prev.filter((x) => x.id !== pendingDeleteUser.id));
+          toast.info("User removed");
+          setPendingDeleteUser(null);
+        }}
+      />
     </div>
   );
 }
+

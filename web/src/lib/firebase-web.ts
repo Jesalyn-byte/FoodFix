@@ -33,7 +33,7 @@ const firebaseConfig = {
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-const databaseId = import.meta.env.EXPO_PUBLIC_FIREBASE_DATABASE_ID;
+const databaseId = import.meta.env.EXPO_PUBLIC_FIREBASE_DATABASE_ID || "default";
 
 export const auth = getAuth(app);
 export const db =
@@ -58,6 +58,53 @@ export interface Category {
   created_at?: Timestamp | { seconds: number };
 }
 
+function parseFirestoreRestValue(val: any): any {
+  if (!val || typeof val !== "object") return val;
+  if ("stringValue" in val) return val.stringValue;
+  if ("booleanValue" in val) return val.booleanValue;
+  if ("integerValue" in val) return Number(val.integerValue);
+  if ("doubleValue" in val) return Number(val.doubleValue);
+  if ("timestampValue" in val) return new Date(val.timestampValue);
+  if ("nullValue" in val) return null;
+  if ("arrayValue" in val) return (val.arrayValue.values || []).map(parseFirestoreRestValue);
+  if ("mapValue" in val) {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val.mapValue.fields || {})) {
+      out[k] = parseFirestoreRestValue(v);
+    }
+    return out;
+  }
+  return null;
+}
+
+async function fetchProfileViaRest(uid: string): Promise<Profile | null> {
+  const user = auth.currentUser;
+  const token = user ? await user.getIdToken() : null;
+  if (!token || !firebaseConfig.projectId) return null;
+  const dbSegment = databaseId || "default";
+  const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbSegment}/documents/profiles/${uid}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const json = await res.json();
+  if (!json.fields) return null;
+  const parsed: any = {};
+  for (const [k, v] of Object.entries(json.fields)) {
+    parsed[k] = parseFirestoreRestValue(v);
+  }
+  return {
+    id: uid,
+    email: parsed.email || user?.email || "",
+    username: parsed.username || user?.displayName || "User",
+    phone: parsed.phone || "",
+    address: parsed.address || "",
+    email_verified: parsed.email_verified,
+    role: parsed.role || (parsed.is_admin ? "admin" : "customer"),
+    is_admin: Boolean(parsed.is_admin || parsed.role === "admin"),
+  };
+}
+
 export function onAuthChange(cb: (user: User | null) => void) {
   return onAuthStateChanged(auth, cb);
 }
@@ -72,7 +119,7 @@ export async function signIn(email: string, password: string) {
 
 export async function signUp(email: string, password: string, username: string) {
   const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-  await setDoc(doc(db, "users", cred.user.uid), {
+  await setDoc(doc(db, "profiles", cred.user.uid), {
     id: cred.user.uid,
     email: email.trim(),
     username: username.trim() || email.split("@")[0],
@@ -93,23 +140,29 @@ export async function logOut() {
 }
 
 export async function getProfile(uid: string): Promise<Profile | null> {
-  const snap = await getDoc(doc(db, "users", uid));
-  if (!snap.exists()) return null;
-  const data = snap.data() as any;
-  return {
-    id: snap.id,
-    ...data,
-    role: data.role || (data.is_admin ? "admin" : "customer"),
-    is_admin: Boolean(data.is_admin || data.role === "admin"),
-  };
+  try {
+    const snap = await getDoc(doc(db, "profiles", uid));
+    if (snap.exists()) {
+      const data = snap.data() as any;
+      return {
+        id: snap.id,
+        ...data,
+        role: data.role || (data.is_admin ? "admin" : "customer"),
+        is_admin: Boolean(data.is_admin || data.role === "admin"),
+      };
+    }
+  } catch {
+    // Fallback to REST when browser privacy shields block WebChannel
+  }
+  return fetchProfileViaRest(uid);
 }
 
 export async function updateProfileDoc(uid: string, patch: Partial<Profile>) {
-  await updateDoc(doc(db, "users", uid), patch as any);
+  await updateDoc(doc(db, "profiles", uid), patch as any);
 }
 
 export async function getAllUsers(): Promise<Profile[]> {
-  const snap = await getDocs(collection(db, "users"));
+  const snap = await getDocs(collection(db, "profiles"));
   return snap.docs.map((d) => {
     const data = d.data() as any;
     return {
@@ -129,11 +182,11 @@ export async function updateUserByAdmin(
   if (data.role) {
     payload.is_admin = data.role === "admin";
   }
-  await updateDoc(doc(db, "users", uid), payload);
+  await updateDoc(doc(db, "profiles", uid), payload);
 }
 
 export async function deleteUser(uid: string) {
-  await deleteDoc(doc(db, "users", uid));
+  await deleteDoc(doc(db, "profiles", uid));
 }
 
 export async function createStaffAccount(input: {
@@ -150,7 +203,7 @@ export async function createStaffAccount(input: {
       input.email.trim(),
       input.password,
     );
-    await setDoc(doc(db, "users", cred.user.uid), {
+    await setDoc(doc(db, "profiles", cred.user.uid), {
       id: cred.user.uid,
       email: input.email.trim(),
       username: input.username.trim(),

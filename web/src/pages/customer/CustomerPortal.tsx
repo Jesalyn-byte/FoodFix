@@ -1,5 +1,7 @@
 import {
   Camera,
+  Clock,
+  ExternalLink,
   Flag,
   Home,
   LogOut,
@@ -7,6 +9,7 @@ import {
   MessageSquare,
   Minus,
   Plus,
+  Printer,
   Receipt,
   Search,
   Send,
@@ -29,6 +32,16 @@ import {
   type PaymentMethod,
 } from "@shared/constants/order";
 import OrderBreakdown from "../../components/OrderBreakdown";
+import {
+  FaqSection,
+  FloatingUtilities,
+  GlobalSearchModal,
+  NewsletterSignup,
+  PrintButton,
+  ThemeToggleButton,
+  withUtm,
+  type SearchEntry,
+} from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
 import { logOut, updateProfileDoc, type Profile } from "../../lib/firebase-web";
 import {
@@ -80,12 +93,15 @@ const LAMION_SUGGESTIONS = [
 
 interface Props {
   profile: Profile;
+  dark: boolean;
+  onToggleDark: () => void;
   onBackAdmin?: () => void;
 }
 
-export default function CustomerPortal({ profile, onBackAdmin }: Props) {
+export default function CustomerPortal({ profile, dark, onToggleDark, onBackAdmin }: Props) {
   const [tab, setTab] = useState<CustomerTab>("home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const [banners, setBanners] = useState<Banner[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -305,9 +321,45 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
     { key: "profile", label: "Profile", icon: UserIcon },
   ];
 
+  const searchEntries: SearchEntry[] = useMemo(
+    () => [
+      ...NAV_LIST.map((n) => ({
+        id: `nav_${n.key}`,
+        category: "Section",
+        title: n.label,
+        subtitle: `Open ${n.label}`,
+        onSelect: () => setTab(n.key),
+      })),
+      ...menuItems.slice(0, 20).map((m) => ({
+        id: `dish_${m.id}`,
+        category: m.category || "Dish",
+        title: m.name,
+        subtitle: `₱${m.price.toFixed(2)} · ${m.description?.slice(0, 60) || "Filipino dish"}`,
+        onSelect: () => {
+          setActiveCat("");
+          setSearch(m.name);
+          setTab("menu");
+        },
+      })),
+      ...orders.slice(0, 8).map((o) => ({
+        id: `ord_${o.id}`,
+        category: ORDER_STATUS_LABELS[o.status] || o.status,
+        title: `Order #${o.order_number}`,
+        subtitle: `₱${o.total.toFixed(2)} · ${formatTimeAgo(o.created_at)}`,
+        onSelect: () => setTab("orders"),
+      })),
+    ],
+    [menuItems, orders],
+  );
+
   return (
     <div className="ff-shell">
-      <aside className={`ff-sidebar ${sidebarOpen ? "open" : ""}`}>
+      <div
+        className={`ff-sidebar-backdrop ${sidebarOpen ? "open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+      <aside className={`ff-sidebar ff-no-print ${sidebarOpen ? "open" : ""}`}>
         <div>
           <div className="ff-brand">
             <img src="/logo.png" alt="FoodFix" />
@@ -348,6 +400,15 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
               <ShieldCheck size={15} /> Back to Admin Console
             </button>
           )}
+          <a
+            href={withUtm("https://github.com/Jesalyn-byte/FoodFix", "customer_sidebar")}
+            target="_blank"
+            rel="noreferrer"
+            className="ff-btn ff-btn-outline"
+            style={{ fontSize: 12 }}
+          >
+            <ExternalLink size={14} /> About FoodFix
+          </a>
           <button type="button" className="ff-btn ff-btn-danger-soft" onClick={() => logOut()}>
             <LogOut size={15} /> Log Out
           </button>
@@ -359,8 +420,9 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
           <div className="ff-topbar-left">
             <button
               type="button"
-              className="ff-btn ff-btn-outline ff-mobile-header"
+              className="ff-btn ff-btn-outline ff-mobile-header ff-no-print"
               onClick={() => setSidebarOpen(!sidebarOpen)}
+              aria-label="Toggle navigation menu"
             >
               <MenuIcon size={18} />
             </button>
@@ -373,16 +435,26 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
           </div>
 
           <div className="ff-topbar-right">
-            <button type="button" className="ff-btn ff-btn-soft" onClick={() => setTab("lamion")}>
+            <button
+              type="button"
+              className="ff-btn ff-btn-outline ff-no-print"
+              style={{ padding: "7px 12px", fontSize: 12.5 }}
+              onClick={() => setSearchOpen(true)}
+            >
+              <Search size={14} /> Search
+            </button>
+            <PrintButton />
+            <ThemeToggleButton dark={dark} onToggle={onToggleDark} />
+            <button type="button" className="ff-btn ff-btn-soft ff-no-print" onClick={() => setTab("lamion")}>
               <Sparkles size={15} /> Ask Lamion AI
             </button>
-            <button type="button" className="ff-btn ff-btn-primary" onClick={() => setTab("cart")}>
+            <button type="button" className="ff-btn ff-btn-primary ff-no-print" onClick={() => setTab("cart")}>
               <ShoppingCart size={15} /> Cart ({cartCount})
             </button>
           </div>
         </header>
 
-        <main className="ff-content">
+        <main id="main-content" className="ff-content">
           {/* HOME */}
           {tab === "home" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
@@ -476,18 +548,23 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
                         key={q.label}
                         type="button"
                         onClick={() => setTab(q.tab)}
-                        className="ff-card"
+                        className="ff-card ff-card-hover"
                         style={{ textAlign: "left", cursor: "pointer" }}
                       >
                         <div style={{ width: 42, height: 42, borderRadius: 12, background: `${q.color}1F`, color: q.color, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
                           <Icon size={20} />
                         </div>
                         <strong style={{ fontSize: 15, display: "block" }}>{q.label}</strong>
-                        <span style={{ fontSize: 12.5, color: "#6D4C41" }}>{q.sub}</span>
+                        <span style={{ fontSize: 12.5, color: "var(--ff-espresso-muted)" }}>{q.sub}</span>
                       </button>
                     );
                   })}
                 </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
+                <FaqSection />
+                <NewsletterSignup />
               </div>
             </div>
           )}
@@ -534,8 +611,8 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
                   const catColor = MENU_CATEGORY_COLORS[item.category] || "#F25C05";
                   const soldOut = !item.available || (!item.is_made_to_order && item.stock_quantity <= 0);
                   return (
-                    <div key={item.id} className="ff-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      <div style={{ height: 175, borderRadius: 14, overflow: "hidden", position: "relative", background: "#FDF5E0" }}>
+                    <div key={item.id} className="ff-card ff-card-hover" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ height: 175, borderRadius: 14, overflow: "hidden", position: "relative", background: "var(--ff-cream-card)" }}>
                         {item.image_url && (
                           <img src={item.image_url} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         )}
@@ -547,9 +624,12 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
                         <strong style={{ fontSize: 16 }}>{item.name}</strong>
                         <strong style={{ fontSize: 16, color: "#F25C05" }}>₱{item.price.toFixed(2)}</strong>
                       </div>
-                      <p style={{ margin: 0, fontSize: 12.5, color: "#6D4C41", flex: 1 }}>
+                      <p style={{ margin: 0, fontSize: 12.5, color: "var(--ff-espresso-muted)", flex: 1 }}>
                         {item.description}
                       </p>
+                      <div className="ff-timestamp">
+                        <Clock size={11} /> Updated {formatTimeAgo(item.updated_at || item.created_at)}
+                      </div>
                       <button
                         type="button"
                         disabled={soldOut}
@@ -668,15 +748,28 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
                   {orders.map((o) => {
                     const color = ORDER_STATUS_COLORS[o.status] || "#888";
                     return (
-                      <div key={o.id} className="ff-card" style={{ borderLeft: `4px solid ${color}`, display: "flex", flexDirection: "column", gap: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div key={o.id} className="ff-card ff-card-hover" style={{ borderLeft: `4px solid ${color}`, display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                           <div>
                             <strong>Order #{o.order_number}</strong>
-                            <div style={{ fontSize: 12, color: "#8C7A6B" }}>{formatTimeAgo(o.created_at)}</div>
+                            <div className="ff-timestamp">
+                              <Clock size={11} /> Updated {formatTimeAgo(o.updated_at || o.created_at)}
+                            </div>
                           </div>
-                          <span className="ff-badge" style={{ background: `${color}20`, color }}>
-                            {ORDER_STATUS_LABELS[o.status]}
-                          </span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <button
+                              type="button"
+                              className="ff-icon-btn ff-no-print"
+                              style={{ width: 32, height: 32 }}
+                              title="Print receipt"
+                              onClick={() => window.print()}
+                            >
+                              <Printer size={14} />
+                            </button>
+                            <span className="ff-badge" style={{ background: `${color}20`, color }}>
+                              {ORDER_STATUS_LABELS[o.status]}
+                            </span>
+                          </div>
                         </div>
                         <OrderBreakdown showItems items={o.items} subtotal={o.subtotal} deliveryFee={o.delivery_fee} total={o.total} />
                         {o.status === "delivered" && (
@@ -1061,6 +1154,12 @@ export default function CustomerPortal({ profile, onBackAdmin }: Props) {
           </div>
         </div>
       )}
+
+      <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} entries={searchEntries} />
+      <FloatingUtilities
+        onOpenContact={() => setTab("chat")}
+        onOpenSearch={() => setSearchOpen(true)}
+      />
     </div>
   );
 }

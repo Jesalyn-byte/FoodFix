@@ -20,6 +20,7 @@ import {
   type OrderStatus,
 } from "@shared/constants/order";
 import OrderBreakdown from "../../components/OrderBreakdown";
+import { CodeSnippetBox, SvgLoader } from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
 import { chatWithLamionWeb } from "../../lib/lamion-web";
 import {
@@ -164,9 +165,8 @@ export default function AdminOverview({ onNavigate }: Props) {
 
   if (loading) {
     return (
-      <div className="ff-card" style={{ textAlign: "center", padding: 48 }}>
-        <RefreshCw size={26} color="#F25C05" style={{ animation: "spin 1s linear infinite" }} />
-        <p style={{ color: "#6D4C41", marginTop: 10 }}>Loading real-time dashboard metrics...</p>
+      <div className="ff-card">
+        <SvgLoader text="Loading real-time dashboard metrics..." />
       </div>
     );
   }
@@ -695,18 +695,14 @@ export default function AdminOverview({ onNavigate }: Props) {
               </button>
             </div>
 
-            {aiLoading && (
-              <div style={{ padding: 14, textAlign: "center", color: "#F25C05", fontSize: 13 }}>
-                Querying Lamion AI &amp; evaluating domain guardrails...
-              </div>
-            )}
+            {aiLoading && <SvgLoader text="Querying Lamion AI & evaluating domain guardrails..." />}
 
             {aiMeta && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-                <span className="ff-badge" style={{ background: "#FDF5E0", color: "#2E1A06" }}>
+                <span className="ff-badge" style={{ background: "var(--ff-cream-card)", color: "var(--ff-espresso)" }}>
                   Model: {aiMeta.model}
                 </span>
-                <span className="ff-badge" style={{ background: "#FDF5E0", color: "#2E1A06" }}>
+                <span className="ff-badge" style={{ background: "var(--ff-cream-card)", color: "var(--ff-espresso)" }}>
                   Latency: {aiMeta.latencyMs}ms
                 </span>
                 <span
@@ -722,21 +718,38 @@ export default function AdminOverview({ onNavigate }: Props) {
             )}
 
             {aiReply && (
-              <div
-                style={{
-                  background: "#FDF9F2",
-                  border: "1px solid #E8D9C0",
-                  borderRadius: 14,
-                  padding: 14,
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  color: "#2E1A06",
-                }}
-              >
-                <strong style={{ color: "#F25C05", display: "block", marginBottom: 4 }}>
-                  Lamion AI Response:
-                </strong>
-                {aiReply}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div
+                  style={{
+                    background: "var(--ff-cream-card)",
+                    border: "1px solid var(--ff-border)",
+                    borderRadius: 14,
+                    padding: 14,
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    color: "var(--ff-espresso)",
+                  }}
+                >
+                  <strong style={{ color: "var(--ff-orange)", display: "block", marginBottom: 4 }}>
+                    Lamion AI Response:
+                  </strong>
+                  {aiReply}
+                </div>
+                {aiMeta && (
+                  <CodeSnippetBox
+                    title="Guardrail & Telemetry Trace (JSON)"
+                    code={JSON.stringify(
+                      {
+                        query: aiQuery,
+                        model: aiMeta.model,
+                        latencyMs: aiMeta.latencyMs,
+                        guardrailVerdict: aiMeta.guardrail,
+                      },
+                      null,
+                      2,
+                    )}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -745,3 +758,4 @@ export default function AdminOverview({ onNavigate }: Props) {
     </div>
   );
 }
+

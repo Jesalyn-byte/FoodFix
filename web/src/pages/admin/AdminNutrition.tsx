@@ -1,5 +1,6 @@
-import { BookOpen, Download, Search, ShieldCheck } from "lucide-react";
+import { BookOpen, Clock, Download, Search, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { SvgLoader } from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
 import {
   formatTimeAgo,
@@ -126,20 +127,23 @@ export default function AdminNutrition() {
       </div>
 
       {loading ? (
-        <div className="ff-card" style={{ textAlign: "center", padding: 40 }}>Loading Lamion AI data...</div>
+        <div className="ff-card"><SvgLoader text="Loading Lamion AI data..." /></div>
       ) : tab === "knowledge" ? (
         <div className="ff-grid-3">
           {filteredKb.map((k) => (
-            <div key={k.id} className="ff-card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div key={k.id} className="ff-card ff-card-hover" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <strong style={{ fontSize: 15 }}>{k.name}</strong>
                 {k.region && (
-                  <span className="ff-badge" style={{ background: "#FFF0E6", color: "#F25C05" }}>
+                  <span className="ff-badge" style={{ background: "var(--ff-orange-tint)", color: "var(--ff-orange)" }}>
                     {k.region}
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 12, color: "#6D4C41" }}>{k.description}</div>
+              <div style={{ fontSize: 12, color: "var(--ff-espresso-muted)" }}>{k.description}</div>
+              <div className="ff-timestamp">
+                <Clock size={11} /> Updated {formatTimeAgo((k as any).updated_at || (k as any).created_at)}
+              </div>
               {k.nutrition && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
                   {k.nutrition.calories != null && (
@@ -204,3 +208,4 @@ export default function AdminNutrition() {
     </div>
   );
 }
+

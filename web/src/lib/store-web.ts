@@ -38,6 +38,7 @@ export interface MenuItem {
   };
   batch_date?: string;
   created_at?: Timestamp | { seconds: number };
+  updated_at?: Timestamp | { seconds: number } | Date;
 }
 
 export interface OrderItem {
@@ -211,15 +212,17 @@ export function onMenuItemsUpdate(cb: (items: MenuItem[]) => void) {
 }
 
 export async function addMenuItem(data: Omit<MenuItem, "id" | "created_at">) {
+  const now = new Date();
   const ref = await addDoc(collection(db, "menu_items"), {
     ...data,
-    created_at: new Date(),
+    created_at: now,
+    updated_at: now,
   });
   return { id: ref.id };
 }
 
 export async function updateMenuItem(id: string, data: Partial<MenuItem>) {
-  await updateDoc(doc(db, "menu_items", id), data as any);
+  await updateDoc(doc(db, "menu_items", id), { ...data, updated_at: new Date() } as any);
 }
 
 export async function deleteMenuItem(id: string) {
@@ -592,24 +595,24 @@ export async function deleteReview(id: string) {
 // ==================== SETTINGS & LAMION RAG / LOGS ====================
 
 export async function getSettings(): Promise<AppSettings> {
-  const snap = await getDoc(doc(db, "settings", "store_config"));
+  const snap = await getDoc(doc(db, "settings", "app_settings"));
   const data = snap.exists() ? (snap.data() as Partial<AppSettings>) : {};
   return {
-    delivery_fee: data.delivery_fee ?? 35,
+    delivery_fee: data.delivery_fee ?? 50,
     delivery_radius_km: data.delivery_radius_km ?? 10,
-    gcash_enabled: data.gcash_enabled ?? true,
+    gcash_enabled: data.gcash_enabled ?? false,
     gcash_number: data.gcash_number ?? "",
     gcash_qr_image: data.gcash_qr_image ?? "",
-    store_name: data.store_name ?? "Derick's Food House",
-    store_address: data.store_address ?? "Sta. Mesa, Manila",
-    store_phone: data.store_phone ?? "09171234567",
-    store_lat: data.store_lat ?? 14.5995,
-    store_lng: data.store_lng ?? 121.0108,
+    store_name: data.store_name ?? "FoodFix",
+    store_address: data.store_address ?? "P. Herrera St, Batangas City, 4200 Batangas",
+    store_phone: data.store_phone ?? "",
+    store_lat: data.store_lat ?? 14.031902,
+    store_lng: data.store_lng ?? 121.206633,
   };
 }
 
 export async function updateSettings(data: Partial<AppSettings>) {
-  await setDoc(doc(db, "settings", "store_config"), data, { merge: true });
+  await setDoc(doc(db, "settings", "app_settings"), data, { merge: true });
 }
 
 export async function getLamionRagKnowledge(): Promise<LamionRagKnowledge[]> {
@@ -645,3 +648,4 @@ export async function uploadToCloudinaryWeb(file: File, folder = "foodfix/web"):
   }
   return json.secure_url as string;
 }
+

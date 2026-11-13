@@ -1,5 +1,6 @@
 import { Archive, MessageSquare, Send, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import ConfirmModal from "../../components/ConfirmModal";
 import { toast } from "../../components/Toast";
 import { getCurrentUser } from "../../lib/firebase-web";
 import {
@@ -22,6 +23,7 @@ export default function AdminMessages() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
 
   async function refreshConvos() {
     const list = await getConversations(showArchived);
@@ -206,13 +208,12 @@ export default function AdminMessages() {
                 <button
                   type="button"
                   className="ff-btn ff-btn-danger-soft"
-                  onClick={async () => {
-                    if (window.confirm("Delete this conversation?")) {
-                      await deleteConversation(activeConvo.customer_id);
-                      setSelectedId(null);
-                      refreshConvos();
-                    }
-                  }}
+                  onClick={() =>
+                    setConfirmDelete({
+                      id: activeConvo.customer_id,
+                      name: activeConvo.customer_name,
+                    })
+                  }
                 >
                   <Trash2 size={14} />
                 </button>
@@ -273,12 +274,29 @@ export default function AdminMessages() {
             </form>
           </>
         ) : (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#8C7A6B" }}>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--ff-gray)" }}>
             <MessageSquare size={34} />
             <p>Select a customer conversation to view messages.</p>
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        open={!!confirmDelete}
+        title="Delete Support Conversation?"
+        description={`Permanently delete all support chat messages with ${confirmDelete?.name || "this customer"}?`}
+        confirmLabel="Delete Thread"
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={async () => {
+          if (!confirmDelete) return;
+          await deleteConversation(confirmDelete.id);
+          toast.info("Conversation deleted");
+          setSelectedId(null);
+          setConfirmDelete(null);
+          refreshConvos();
+        }}
+      />
     </div>
   );
 }
+

@@ -1,8 +1,11 @@
-import { Edit3, Plus, Trash2, Upload, X } from "lucide-react";
+import { Clock, Edit3, Plus, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import ConfirmModal from "../../components/ConfirmModal";
+import { SvgLoader } from "../../components/SiteChrome";
 import { toast } from "../../components/Toast";
 import {
   deleteBanner,
+  formatTimeAgo,
   getBanners,
   saveBanner,
   uploadToCloudinaryWeb,
@@ -16,6 +19,7 @@ export default function AdminBanners() {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", imageUrl: "", active: true });
   const [uploading, setUploading] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Banner | null>(null);
 
   async function load() {
     setLoading(true);
@@ -53,12 +57,12 @@ export default function AdminBanners() {
       </div>
 
       {loading ? (
-        <div className="ff-card" style={{ textAlign: "center", padding: 40 }}>Loading banners...</div>
+        <div className="ff-card"><SvgLoader text="Loading promotional banners..." /></div>
       ) : (
         <div className="ff-grid-2">
           {banners.map((b) => (
-            <div key={b.id} className="ff-card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ height: 190, borderRadius: 14, overflow: "hidden", background: "#FDF5E0", position: "relative" }}>
+            <div key={b.id} className="ff-card ff-card-hover" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ height: 190, borderRadius: 14, overflow: "hidden", background: "var(--ff-cream-card)", position: "relative" }}>
                 <img src={b.imageUrl} alt={b.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 <span
                   className="ff-badge"
@@ -74,7 +78,12 @@ export default function AdminBanners() {
                 </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <strong style={{ fontSize: 16 }}>{b.name}</strong>
+                <div>
+                  <strong style={{ fontSize: 16 }}>{b.name}</strong>
+                  <div className="ff-timestamp">
+                    <Clock size={11} /> Updated {formatTimeAgo((b as any).updated_at || (b as any).created_at)}
+                  </div>
+                </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <button
                     type="button"
@@ -90,11 +99,7 @@ export default function AdminBanners() {
                   <button
                     type="button"
                     className="ff-btn ff-btn-danger-soft"
-                    onClick={async () => {
-                      await deleteBanner(b.id);
-                      toast.info("Banner deleted");
-                      load();
-                    }}
+                    onClick={() => setPendingDelete(b)}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -104,6 +109,21 @@ export default function AdminBanners() {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="Delete Promotional Banner?"
+        description={`Remove "${pendingDelete?.name || ""}" from the Customer Storefront carousel?`}
+        confirmLabel="Delete Banner"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          await deleteBanner(pendingDelete.id);
+          toast.info("Banner deleted");
+          setPendingDelete(null);
+          load();
+        }}
+      />
 
       {modalOpen && (
         <div className="ff-modal-overlay" onClick={() => setModalOpen(false)}>
@@ -186,3 +206,4 @@ export default function AdminBanners() {
     </div>
   );
 }
+

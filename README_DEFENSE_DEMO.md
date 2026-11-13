@@ -1,10 +1,10 @@
-# 🎓 FOODFIX (Lamion AI) — Thesis Defense Quick Start Guide
+# FOODFIX (Lamion AI) — Thesis Defense Quick Start Guide
 
 Welcome to the **FoodFix & Lamion AI** presentation and technical debugging suite! This package is prepared for a **one-time setup** on your laptop so you can demonstrate the full application (Admin, Staff, Customer, and AI subsystems) with zero friction during your defense.
 
 ---
 
-## ⚡ 1-Minute Quick Start (Windows)
+## 1-Minute Quick Start (Windows)
 
 1. **Extract this ZIP folder** to any location (e.g. `Desktop` or `Documents`).
 2. **Double-click `run-demo.bat`**.
@@ -17,7 +17,7 @@ Welcome to the **FoodFix & Lamion AI** presentation and technical debugging suit
 
 ---
 
-## 🧭 Defense Demonstration Menu Overview
+## Defense Demonstration Menu Overview
 
 When you run `run-demo.bat`, you will see:
 
@@ -32,19 +32,19 @@ When you run `run-demo.bat`, you will see:
 
 ---
 
-## 🔑 Demo Accounts Cheat-Sheet
+## Demo Accounts Cheat-Sheet
 
 Log in with any of the accounts below (or use the sidebar **Quick View** links once signed in as Admin to jump directly between Customer Storefront and Staff / Rider views):
 
 | Role | Email | Password | Access |
 |---|---|---|---|
-| **👑 Admin (Owner)** | `admin@foodfix.com` | `admin12345` | Revenue, 1-click order workflow, GCash approvals, refunds, stock |
-| **🛵 Staff (Rider)** | `staff@foodfix.com` | `staff12345` | Kitchen preparation queue, delivery dispatch, order status |
-| **🛍️ Customer** | `customer@foodfix.com` | `password123` | Browsing, ordering, live delivery tracking, Lamion AI chat |
+| **Admin (Owner)** | `admin@foodfix.com` | `admin12345` | Revenue, 1-click order workflow, GCash approvals, refunds, stock |
+| **Staff (Rider)** | `staff@foodfix.com` | `staff12345` | Kitchen preparation queue, delivery dispatch, order status |
+| **Customer** | `customer@foodfix.com` | `password123` | Browsing, ordering, live delivery tracking, Lamion AI chat |
 
 ---
 
-## 🌟 Key Features to Highlight to the Panel
+## Key Features to Highlight to the Panel
 
 1. **Responsive React.js Web Dashboard (Same UI & Features as the Mobile App)**:
    - Built with React.js + Vite in `web/` matching FoodFix's warm cream `#F9F0DC`, orange `#F25C05`, and espresso `#2E1A06` UI design.

@@ -1,12 +1,14 @@
-import { Edit3, History, PackagePlus, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { Clock, Edit3, History, PackagePlus, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { MENU_CATEGORIES, MENU_CATEGORY_COLORS } from "@shared/constants/order";
+import ConfirmModal from "../../components/ConfirmModal";
 import { toast } from "../../components/Toast";
 import { addCategory, deleteCategory, getCategories, type Category } from "../../lib/firebase-web";
 import {
   addInventoryAdjustment,
   addMenuItem,
   deleteMenuItem,
+  formatTimeAgo,
   getInventoryAdjustments,
   onMenuItemsUpdate,
   updateMenuItem,
@@ -51,6 +53,11 @@ export default function AdminMenu() {
   const [catModalOpen, setCatModalOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState("#F25C05");
+  const [confirmTarget, setConfirmTarget] = useState<
+    | { kind: "dish"; item: MenuItem }
+    | { kind: "category"; cat: Category }
+    | null
+  >(null);
 
   useEffect(() => {
     const unsub = onMenuItemsUpdate(setItems);
@@ -285,6 +292,10 @@ export default function AdminMenu() {
                 {item.nutrients?.calories ? <span>{item.nutrients.calories} kcal</span> : null}
               </div>
 
+              <div className="ff-timestamp">
+                <Clock size={11} /> Updated {formatTimeAgo(item.updated_at || item.created_at)}
+              </div>
+
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   type="button"
@@ -311,12 +322,7 @@ export default function AdminMenu() {
                 <button
                   type="button"
                   className="ff-btn ff-btn-danger-soft"
-                  onClick={async () => {
-                    if (window.confirm(`Delete ${item.name}?`)) {
-                      await deleteMenuItem(item.id);
-                      toast.info(`Deleted ${item.name}`);
-                    }
-                  }}
+                  onClick={() => setConfirmTarget({ kind: "dish", item })}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -570,10 +576,7 @@ export default function AdminMenu() {
                   <button
                     type="button"
                     className="ff-btn ff-btn-danger-soft"
-                    onClick={async () => {
-                      await deleteCategory(c.id);
-                      setCategories(await getCategories());
-                    }}
+                    onClick={() => setConfirmTarget({ kind: "category", cat: c })}
                   >
                     Delete
                   </button>
@@ -583,6 +586,31 @@ export default function AdminMenu() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirmTarget}
+        title={
+          confirmTarget?.kind === "dish"
+            ? `Delete "${confirmTarget.item.name}"?`
+            : `Delete category "${confirmTarget?.cat.name || ""}"?`
+        }
+        description="This permanently removes the selected entry from Firestore."
+        confirmLabel="Delete"
+        onCancel={() => setConfirmTarget(null)}
+        onConfirm={async () => {
+          if (!confirmTarget) return;
+          if (confirmTarget.kind === "dish") {
+            await deleteMenuItem(confirmTarget.item.id);
+            toast.info(`Deleted ${confirmTarget.item.name}`);
+          } else {
+            await deleteCategory(confirmTarget.cat.id);
+            setCategories(await getCategories());
+            toast.info(`Deleted category ${confirmTarget.cat.name}`);
+          }
+          setConfirmTarget(null);
+        }}
+      />
     </div>
   );
 }
+

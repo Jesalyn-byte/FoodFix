@@ -1,11 +1,13 @@
 import {
   BookOpen,
+  ExternalLink,
   Images,
   LayoutDashboard,
   LogOut,
   Menu as MenuIcon,
   MessageSquare,
   Receipt,
+  Search,
   Settings,
   ShieldCheck,
   Star,
@@ -13,7 +15,15 @@ import {
   Truck,
   Utensils,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  FloatingUtilities,
+  GlobalSearchModal,
+  PrintButton,
+  ThemeToggleButton,
+  withUtm,
+  type SearchEntry,
+} from "../../components/SiteChrome";
 import { logOut, type Profile } from "../../lib/firebase-web";
 import AdminBanners from "./AdminBanners";
 import AdminMenu from "./AdminMenu";
@@ -39,18 +49,25 @@ type AdminTabKey = (typeof ADMIN_TABS)[number]["key"];
 
 interface Props {
   profile: Profile;
+  dark: boolean;
+  onToggleDark: () => void;
   onSwitchCustomer: () => void;
   onSwitchStaff: () => void;
+  onTrigger404?: () => void;
 }
 
 export default function AdminDashboardShell({
   profile,
+  dark,
+  onToggleDark,
   onSwitchCustomer,
   onSwitchStaff,
+  onTrigger404,
 }: Props) {
   const [activeTab, setActiveTab] = useState<AdminTabKey>("overview");
   const [ordersFilter, setOrdersFilter] = useState<string>("all");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const currentTabMeta = ADMIN_TABS.find((t) => t.key === activeTab) || ADMIN_TABS[0];
 
@@ -62,10 +79,50 @@ export default function AdminDashboardShell({
     setSidebarOpen(false);
   }
 
+  const searchEntries: SearchEntry[] = useMemo(
+    () => [
+      ...ADMIN_TABS.map((t) => ({
+        id: `tab_${t.key}`,
+        category: "Admin Page",
+        title: t.label,
+        subtitle: `Open ${t.label} section`,
+        onSelect: () => handleNavigate(t.key),
+      })),
+      {
+        id: "filter_gcash",
+        category: "Action",
+        title: "Verify Pending GCash Payments",
+        subtitle: "Jump to Orders awaiting verification",
+        onSelect: () => handleNavigate("orders", "placed"),
+      },
+      {
+        id: "switch_staff",
+        category: "Portal",
+        title: "Staff & Rider Queue",
+        subtitle: "Switch into the active kitchen & delivery workflow",
+        onSelect: onSwitchStaff,
+      },
+      {
+        id: "switch_customer",
+        category: "Portal",
+        title: "Customer Storefront",
+        subtitle: "Preview how customers order and chat with Lamion AI",
+        onSelect: onSwitchCustomer,
+      },
+    ],
+    [onSwitchCustomer, onSwitchStaff],
+  );
+
   return (
     <div className="ff-shell">
+      <div
+        className={`ff-sidebar-backdrop ${sidebarOpen ? "open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+
       {/* Left White FoodFix Sidebar */}
-      <aside className={`ff-sidebar ${sidebarOpen ? "open" : ""}`}>
+      <aside className={`ff-sidebar ff-no-print ${sidebarOpen ? "open" : ""}`}>
         <div>
           <div className="ff-brand">
             <img src="/logo.png" alt="FoodFix" />
@@ -112,6 +169,25 @@ export default function AdminDashboardShell({
           >
             <Truck size={15} /> Staff / Rider Queue
           </button>
+          {onTrigger404 && (
+            <button
+              type="button"
+              className="ff-btn ff-btn-outline"
+              style={{ fontSize: 12 }}
+              onClick={onTrigger404}
+            >
+              Test 404 Fallback
+            </button>
+          )}
+          <a
+            href={withUtm("https://console.firebase.google.com/", "admin_sidebar")}
+            target="_blank"
+            rel="noreferrer"
+            className="ff-btn ff-btn-outline"
+            style={{ fontSize: 12 }}
+          >
+            <ExternalLink size={14} /> Firebase Console
+          </a>
           <button type="button" className="ff-btn ff-btn-danger-soft" onClick={() => logOut()}>
             <LogOut size={15} /> Log Out
           </button>
@@ -124,8 +200,9 @@ export default function AdminDashboardShell({
           <div className="ff-topbar-left">
             <button
               type="button"
-              className="ff-btn ff-btn-outline ff-mobile-header"
+              className="ff-btn ff-btn-outline ff-mobile-header ff-no-print"
               onClick={() => setSidebarOpen(!sidebarOpen)}
+              aria-label="Toggle navigation menu"
             >
               <MenuIcon size={18} />
             </button>
@@ -138,16 +215,26 @@ export default function AdminDashboardShell({
           </div>
 
           <div className="ff-topbar-right">
-            <span className="ff-live-pill">
-              <span className="ff-live-dot" /> Real-Time Firestore Sync
+            <button
+              type="button"
+              className="ff-btn ff-btn-outline ff-no-print"
+              style={{ padding: "7px 12px", fontSize: 12.5 }}
+              onClick={() => setSearchOpen(true)}
+            >
+              <Search size={14} /> Search
+            </button>
+            <PrintButton />
+            <ThemeToggleButton dark={dark} onToggle={onToggleDark} />
+            <span className="ff-live-pill ff-no-print">
+              <span className="ff-live-dot" /> Real-Time Sync
             </span>
-            <span className="ff-badge" style={{ background: "#2E1A06", color: "#fff", padding: "7px 12px" }}>
+            <span className="ff-badge ff-no-print" style={{ background: "#2E1A06", color: "#fff", padding: "7px 12px" }}>
               <ShieldCheck size={14} color="#F39C12" /> Owner / Admin
             </span>
           </div>
         </header>
 
-        <main className="ff-content">
+        <main id="main-content" className="ff-content">
           {activeTab === "overview" && <AdminOverview onNavigate={handleNavigate} />}
           {activeTab === "orders" && <AdminOrders initialFilter={ordersFilter} />}
           {activeTab === "menu" && <AdminMenu />}
@@ -158,6 +245,13 @@ export default function AdminDashboardShell({
           {activeTab === "users" && <AdminSettingsUsers />}
         </main>
       </div>
+
+      <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} entries={searchEntries} />
+      <FloatingUtilities
+        onOpenContact={() => handleNavigate("messages")}
+        onOpenSearch={() => setSearchOpen(true)}
+      />
     </div>
   );
 }
+
