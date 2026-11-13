@@ -52,3 +52,4 @@ echo "  SETUP COMPLETE!"
 echo "  All dependencies installed in: $SCRIPT_DIR"
 echo "  Next step: Run 'bash start-localhost.sh' to start http://localhost:3000"
 echo "======================================================================"
+

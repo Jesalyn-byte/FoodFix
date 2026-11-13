@@ -5,7 +5,7 @@ import { getAuth } from 'firebase/auth';
 import { Platform } from 'react-native';
 
 // Firebase configuration
-const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'lasangpinoy-mobile';
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'foodfix-lasangpinoy-2026';
 const FIRESTORE_DATABASE_ID = process.env.EXPO_PUBLIC_FIREBASE_DATABASE_ID || 'default';
 const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '';
 

@@ -33,3 +33,4 @@ elif command -v xdg-open >/dev/null 2>&1; then
 fi
 
 exec node "$SCRIPT_DIR/scripts/serve-web.js"
+

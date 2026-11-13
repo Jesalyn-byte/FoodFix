@@ -10,9 +10,9 @@
  *   node scripts/migrate-order-numbers.js --apply    # writes the new order numbers + counter
  */
 
-const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'lasangpinoy-mobile';
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'foodfix-lasangpinoy-2026';
 const DATABASE_ID = 'default';
-const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyAZ36rq3scKZDT5SsETJ_SYIOEB9Gcbkyk';
+const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '';
 const ADMIN_EMAIL = process.env.MIGRATION_ADMIN_EMAIL || 'admin@foodfix.com';
 const ADMIN_PASSWORD = process.env.MIGRATION_ADMIN_PASSWORD || 'admin12345';
 const BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DATABASE_ID}/documents`;

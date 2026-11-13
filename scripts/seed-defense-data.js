@@ -26,7 +26,7 @@ if (fs.existsSync(envPath)) {
 }
 
 const API_KEY = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '';
-const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'lasangpinoy-mobile';
+const PROJECT_ID = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'foodfix-lasangpinoy-2026';
 const BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/default/documents`;
 const AUTH_URL = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`;
 
