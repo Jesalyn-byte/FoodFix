@@ -211,31 +211,34 @@ REM ======================================================================
 :menu
 echo.
 echo ======================================================================
-echo   FOODFIX READY - TECHNICAL DEMO ^& DEBUGGING MENU
+echo   FOODFIX READY - THESIS DEFENSE DEMO ^& TECHNICAL DEBUGGING MENU
 echo   Active Path: %CD%
 echo ======================================================================
-echo   [1] Start Local Expo Server (Web + Mobile QR Code for Android/iOS)
-echo   [2] Start Local Web Server Only (Opens http://localhost:8081)
-echo   [3] Launch Lamion AI Live Technical Debugger (Terminal Chat ^& Guardrails)
-echo   [4] Run Automated Test Suite (117 Unit Tests: Lamion AI + Guardrails + DB)
-echo   [5] Run TypeScript Compiler Verification (npx tsc --noEmit)
-echo   [6] Open Project Folder in VS Code / File Explorer
-echo   [7] Force Re-install Dependencies (npm install)
+echo   [1] Launch Production Web Dashboard (Fast http://localhost:3000 - Instant Load)
+echo   [2] Start Expo Metro Dev Server (Web + Mobile QR Code http://localhost:8081)
+echo   [3] Launch Lamion AI Live Technical Debugger (CLI Chat ^& Guardrails)
+echo   [4] Populate / Reset Live Defense Data (Orders #1041-#1045, GCash, Chat)
+echo   [5] Run Automated Test Suite (117 Unit Tests: Lamion AI + Guardrails + DB)
+echo   [6] Run TypeScript Compiler Verification (npx tsc --noEmit)
+echo   [7] Open Project Folder in VS Code / File Explorer
+echo   [8] Force Re-install Dependencies (npm install)
 echo   [0] Exit
 echo ======================================================================
-set /p "CHOICE=Select an option [1-7, or 0 to exit] (default=1): "
+set /p "CHOICE=Select an option [1-8, or 0 to exit] (default=1): "
 if "%CHOICE%"=="" set "CHOICE=1"
 
 if "%CHOICE%"=="1" (
     echo.
-    echo Starting Expo Dev Server ^(Press 'w' for Web, scan QR for Android, Ctrl+C to stop^)...
-    call npx expo start -c
+    echo Launching Production Web Dashboard on http://localhost:3000...
+    start http://localhost:3000
+    call npx serve dist -l 3000
     goto :menu
 )
 if "%CHOICE%"=="2" (
     echo.
-    echo Starting Expo Web Server on http://localhost:8081 ^(Press Ctrl+C to stop^)...
-    call npx expo start --web -c
+    echo Starting Expo Dev Server on http://localhost:8081 ^(Press 'w' for Web, scan QR for Android^)...
+    start http://localhost:8081
+    call npx expo start -c
     goto :menu
 )
 if "%CHOICE%"=="3" (
@@ -245,13 +248,21 @@ if "%CHOICE%"=="3" (
 )
 if "%CHOICE%"=="4" (
     echo.
+    echo Populating live defense orders, GCash notifications, and chat...
+    node scripts/seed-defense-data.js
+    echo.
+    pause
+    goto :menu
+)
+if "%CHOICE%"=="5" (
+    echo.
     echo Running all 117 automated unit tests...
     call npm test
     echo.
     pause
     goto :menu
 )
-if "%CHOICE%"=="5" (
+if "%CHOICE%"=="6" (
     echo.
     echo Running TypeScript typecheck...
     call npx tsc --noEmit
@@ -260,7 +271,7 @@ if "%CHOICE%"=="5" (
     pause
     goto :menu
 )
-if "%CHOICE%"=="6" (
+if "%CHOICE%"=="7" (
     where code >nul 2>&1
     if not errorlevel 1 (
         call code "%CD%"
@@ -269,7 +280,7 @@ if "%CHOICE%"=="6" (
     )
     goto :menu
 )
-if "%CHOICE%"=="7" (
+if "%CHOICE%"=="8" (
     call npm install
     goto :menu
 )

@@ -137,19 +137,24 @@ while true; do
   [1] Start Local Expo Server (Web + Mobile QR Code for Android/iOS)
   [2] Start Local Web Server Only (Opens http://localhost:8081)
   [3] Launch Lamion AI Live Technical Debugger (Terminal Chat & Guardrails)
-  [4] Run Automated Test Suite (117 Unit Tests: Lamion AI + Guardrails + DB)
-  [5] Run TypeScript Compiler Verification (npx tsc --noEmit)
+  [1] Launch Production Web Dashboard (Fast http://localhost:3000 - Instant Load)
+  [2] Start Expo Metro Dev Server (Web + Mobile QR Code http://localhost:8081)
+  [3] Launch Lamion AI Live Technical Debugger (CLI Chat & Guardrails)
+  [4] Populate / Reset Live Defense Data (Orders #1041-#1045, GCash, Chat)
+  [5] Run Automated Test Suite (117 Unit Tests: Lamion AI + Guardrails + DB)
+  [6] Run TypeScript Compiler Verification (npx tsc --noEmit)
   [0] Exit
 ======================================================================
 EOF
-    read -r -p "Select an option [1-5, or 0 to exit] (default=1): " CHOICE
+    read -r -p "Select an option [1-6, or 0 to exit] (default=1): " CHOICE
     CHOICE="${CHOICE:-1}"
     case "$CHOICE" in
-        1) npx expo start -c ;;
-        2) npx expo start --web -c ;;
+        1) npx serve dist -l 3000 ;;
+        2) npx expo start -c ;;
         3) node scripts/debug-lamion-demo.js ;;
-        4) npm test ;;
-        5) npx tsc --noEmit && ok "0 TypeScript errors!" ;;
+        4) node scripts/seed-defense-data.js ;;
+        5) npm test ;;
+        6) npx tsc --noEmit && ok "0 TypeScript errors!" ;;
         0) exit 0 ;;
     esac
 done

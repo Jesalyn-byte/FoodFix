@@ -24,7 +24,7 @@ function notify() {
 }
 
 function persist() {
-  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(messages)).catch(() => {});
+  AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(messages)).catch(() => { });
 }
 
 /** Subscribe to store changes; returns the unsubscribe function. */
